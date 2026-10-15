@@ -1,0 +1,4 @@
+#!/bin/sh
+# Run from any directory; installation remains inside this checkout.
+set -eu
+exec python3 "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/tools/setup.py" "$@"
