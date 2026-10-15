@@ -6,7 +6,7 @@ import { Cloudflare, Store, createApp, signingKey } from './core.mjs';
 const origin = 'https://app.flownium.test';
 function fixture(workspaceDomain = 'flownium.test') {
   const store = new Store(), signer = signingKey();
-  let identity = { id: 'github:1', login: 'arhaan', name: 'Arhaan', email: 'owner@example.test' };
+  let identity = { id: 'github:1', login: 'demo', name: 'Demo User', email: 'owner@example.test' };
   const calls = [];
   const cloudflare = {
     async provision(device) { calls.push(device); return { tunnelId: 'test-tunnel', dnsId: 'test-dns', tunnelToken: 'test-scoped-token' }; },
@@ -48,7 +48,7 @@ function fixture(workspaceDomain = 'flownium.test') {
 
 test('pairing provisions an account-owned subdomain; repeat enrollment is idempotent', async () => {
   const f = fixture(), browser = await f.browserLogin(), device = await f.enroll(browser);
-  assert.equal(device.hostname, 'arhaan.flownium.test');
+  assert.equal(device.hostname, 'demo.flownium.test');
   assert.equal(device.oidc_issuer, origin);
   assert.equal(device.oidc_client_id, device.device_id);
   const again = await f.request('/v1/devices', { method: 'POST', token: device.access_token, body: { name: 'Main laptop', local_port: 19119, kind: 'hermes-dashboard', transport: 'cloudflare' } });
@@ -121,11 +121,11 @@ test('Cloudflare adapter sends only the selected loopback port and hostname', as
     const result = url.endsWith('/token') ? 'scoped-token' : url.includes('/dns_records') ? { id: 'dns-id' } : { id: 'tunnel-id' };
     return Response.json({ success: true, result });
   });
-  const result = await provider.provision({ id: 'device-id', hostname: 'arhaan.flownium.test', port: 19119 });
+  const result = await provider.provision({ id: 'device-id', hostname: 'demo.flownium.test', port: 19119 });
   assert.equal(result.tunnelToken, 'scoped-token');
   const config = JSON.parse(calls.find(call => call.url.endsWith('/configurations')).options.body);
   assert.equal(config.config.ingress[0].service, 'http://127.0.0.1:19119');
-  assert.equal(config.config.ingress[0].hostname, 'arhaan.flownium.test');
+  assert.equal(config.config.ingress[0].hostname, 'demo.flownium.test');
   assert.deepEqual(config.config.ingress[1], { service: 'http_status:404' });
   assert.ok(calls.at(-1).url.includes('/dns_records'));
 });
@@ -170,6 +170,6 @@ test('failed Cloudflare DNS provisioning rolls back the newly created tunnel', a
     if (url.includes('/dns_records')) return Response.json({ success: false }, { status: 403 });
     return Response.json({ success: true, result: url.endsWith('/token') ? 'scoped-token' : { id: 'tunnel-id' } });
   });
-  await assert.rejects(provider.provision({ id: 'device', hostname: 'arhaan.flownium.test', port: 19119 }));
+  await assert.rejects(provider.provision({ id: 'device', hostname: 'demo.flownium.test', port: 19119 }));
   assert.deepEqual(calls.at(-1), { url: 'https://api.cloudflare.com/client/v4/accounts/account/cfd_tunnel/tunnel-id', method: 'DELETE' });
 });

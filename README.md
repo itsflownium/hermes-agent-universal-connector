@@ -7,7 +7,7 @@ workspace. Your agent keeps running on your own computer.
 ## Open the Nectit web workspace
 
 ```sh
-git clone --branch hermes-agent-local-app https://github.com/itsflownium/hermes-agent-universal-connector.git
+git clone https://github.com/itsflownium/hermes-agent-universal-connector.git
 cd hermes-agent-universal-connector
 ./setup --desktop
 ./nectit app
@@ -26,12 +26,32 @@ Nothing is deployed by these commands. Any-device browser access needs a reachab
 HTTPS gateway; Iroh links that gateway to your laptop. See [app setup and gateway
 configuration](app/README.md) for the complete flow, updates and current limits.
 
+## Each installation is private and local
+
+Cloning this repository starts with an empty Nectit account and no connected
+computer. Create your own email/password account, then connect **your own**
+Hermes installation. The code does not contain a preconfigured account, an
+endpoint ticket, a native session cookie or model API keys. Someone else's clone
+does not connect to the repository owner's computer.
+
+`http://127.0.0.1:8788` points to the computer running the command. Browser chats
+are handled by its connected Hermes backend, so the agent uses that computer's
+existing models, tools and sessions. Another computer can connect over Iroh only
+with a host's endpoint ticket and sharing credentials. Phone/browser-only access
+from elsewhere still needs a reachable HTTPS gateway.
+
+Runtime settings, password hashes, native cookies and Iroh keys remain in ignored
+private state directories. Keep those files private when sharing a checkout.
+The current local app supports one account per data directory; shared public
+registration, personal subdomains, email verification and password recovery are
+not enabled in this release.
+
 ## Terminal-only dashboard setup
 
 On the computer that already has Hermes Agent installed and configured:
 
 ```sh
-git clone --branch hermes-agent-local-app https://github.com/itsflownium/hermes-agent-universal-connector.git
+git clone https://github.com/itsflownium/hermes-agent-universal-connector.git
 cd hermes-agent-universal-connector
 ./setup
 ```
@@ -40,7 +60,6 @@ Choose **Share Hermes on this computer**, enter an email address and a strong pa
 and keep the printed endpoint ticket. Setup downloads the checksum-verified Iroh
 transport into this checkout and starts a dedicated Hermes connection. It needs
 Git and Python 3.10+; it does not install global packages or change your shell.
-The branch argument selects this implementation while the website PR is unmerged.
 
 On the other computer, clone the same repository and run:
 

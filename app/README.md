@@ -12,7 +12,7 @@ can prepare the desktop renderer with `hermes gui --build-only`.
 Use Node.js 22+, Python 3.10+ and Git on macOS/Linux or WSL2:
 
 ```sh
-git clone --branch hermes-agent-local-app https://github.com/itsflownium/hermes-agent-universal-connector.git
+git clone https://github.com/itsflownium/hermes-agent-universal-connector.git
 cd hermes-agent-universal-connector
 ./setup --desktop
 ./nectit app
@@ -43,7 +43,7 @@ website use the same controller state, so `./nectit off`, `on`, `status` and
 stops a host it started in that run, and preserves a host already running when
 it connected. `--state-dir PATH` selects an isolated controller.
 
-On another computer, clone this branch and run `./nectit app`. Select **Another
+On another computer, clone the repository and run `./nectit app`. Select **Another
 computer** in setup and paste the host ticket. This device needs Node and Python
 for the local gateway, but it does not need Hermes. The host must have been
 started with `./setup --desktop` (or upgraded with `./nectit on --desktop`).

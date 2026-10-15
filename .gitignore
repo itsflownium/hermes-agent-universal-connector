@@ -23,3 +23,7 @@ control.sock
 *.log
 .playwright-cli/
 output/playwright/
+
+local.json
+
+iroh-key
