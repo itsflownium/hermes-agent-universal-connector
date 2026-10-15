@@ -15,3 +15,9 @@ data/
 dist/
 build/
 .DS_Store
+basic-auth.json
+iroh-key.json
+iroh-client-key.json
+gateway-iroh-key
+control.sock
+*.log
