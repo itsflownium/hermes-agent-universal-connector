@@ -167,7 +167,7 @@ def executable(value, name):
 def load_config(state):
     config = read_json(state / "config.json")
     if not config:
-        raise FlowniumError("First run 'flownium local' or 'flownium login'.")
+        raise FlowniumError("First run './setup', 'flownium share', or 'flownium login'.")
     return config
 
 
@@ -223,6 +223,9 @@ def print_status(data, as_json=False):
 
 def free_port(port):
     with socket.socket() as listener:
+        # Match dashboard servers' address reuse: recently closed connections
+        # in TIME_WAIT must not prevent off -> on. An active listener still fails.
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             listener.bind(("127.0.0.1", port))
         except OSError:
@@ -597,7 +600,7 @@ def login(state, args):
     from flownium_distribution import SERVICE_URL
     value = args.server or os.environ.get("FLOWNIUM_SERVER") or previous.get("server") or SERVICE_URL
     if not value:
-        raise FlowniumError("Flownium's public account service is not deployed/configured yet. The operator must supply its URL with --server or FLOWNIUM_SERVER; users do not configure a domain or tunnel. Use 'flownium local' to connect to real Hermes now.")
+        raise FlowniumError("Flownium's public account service is not deployed/configured yet. The operator must supply its URL with --server or FLOWNIUM_SERVER; users do not configure a domain or tunnel. Use './setup --mode host' for private Iroh sharing now.")
     server = server_url(value)
     installation = read_json(state / "installation.json")
     if not installation:
@@ -725,7 +728,7 @@ def parser():
     command.add_argument("--no-browser", action="store_true")
     sub.add_parser("on", help="Start Hermes and the configured Iroh or Cloudflare transport")
     sub.add_parser("off", help="Stop only the processes managed by Flownium")
-    sub.add_parser("logout", help="Stop remote access and revoke this laptop's tunnel")
+    sub.add_parser("logout", help="Stop remote access and revoke this laptop's connection")
     sub.add_parser("open", help="Open the configured Hermes workspace")
     for name in ("status", "doctor"):
         command = sub.add_parser(name)

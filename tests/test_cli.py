@@ -17,6 +17,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import flownium_cli as cli
 
+# Hosted macOS runners can take several seconds to cold-start Python fixtures.
+# Keep startup bounded while allowing that delay; successful tests do not sleep.
+FIXTURE_STARTUP = 15
+
 
 def available_port():
     with socket.socket() as probe:
@@ -101,20 +105,31 @@ http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
         env.pop("FLOWNIUM_SERVER", None)
         result = subprocess.run([sys.executable, str(ROOT / "flownium_cli.py"),
                                  "--state-dir", str(self.state), *args],
-                                env=env, capture_output=True, text=True, timeout=25, input=input)
+                                env=env, capture_output=True, text=True, timeout=60, input=input)
+        if result.returncode:
+            # These executables are explicit fixtures, so their output contains
+            # no real Hermes state or external account credentials.
+            diagnostics = []
+            for name in ("controller.log", "hermes.log", "cloudflared.log", "iroh.log"):
+                path = self.state / name
+                if path.exists():
+                    diagnostics.append(f"{name}: {path.read_text()[-4000:]}")
+            for path in self.root.glob("*.process.json"):
+                diagnostics.append(f"{path.name}: {path.read_text()}")
+            result.stderr += "\n" + "\n".join(diagnostics)
         if check and result.returncode:
             self.fail(result.stdout + result.stderr)
         return result
 
     def local(self):
         return self.run_cli("local", "--hermes-bin", str(self.hermes), "--port", str(self.port),
-                            "--metrics-port", str(self.metrics), "--workspace", str(self.root), "--timeout", "3")
+                            "--metrics-port", str(self.metrics), "--workspace", str(self.root), "--timeout", str(FIXTURE_STARTUP))
 
     def remote_config(self):
         cli.save_json(self.state / "config.json", {
             "mode": "remote", "port": self.port, "metrics_port": self.metrics,
             "hermes_bin": str(self.hermes), "cloudflared_bin": str(self.cloudflared),
-            "workspace": str(self.root), "startup_timeout": 3,
+            "workspace": str(self.root), "startup_timeout": FIXTURE_STARTUP,
             "hostname": "person.flownium.test", "device_id": "fixture-device",
         })
         (self.state / "tunnel-token").write_text("fixture-scoped-token")
@@ -207,7 +222,7 @@ http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
         password = "correct-test-password"
         result = self.run_cli("share", "--username", "testuser", "--password-stdin", "--dumbpipe-bin", str(self.dumbpipe),
                               "--hermes-bin", str(self.hermes), "--port", str(self.port), "--metrics-port", str(self.metrics),
-                              "--workspace", str(self.root), "--timeout", "3", input=password + "\n")
+                              "--workspace", str(self.root), "--timeout", str(FIXTURE_STARTUP), input=password + "\n")
         self.assertNotIn(password, result.stdout + result.stderr)
         self.assertNotIn(password, (self.state / "basic-auth.json").read_text())
         status = json.loads(self.run_cli("status", "--json").stdout)
@@ -221,8 +236,30 @@ http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
         (self.root / "no-auth").touch()
         result = self.run_cli("share", "--username", "testuser", "--password-stdin", "--dumbpipe-bin", str(self.dumbpipe),
                               "--hermes-bin", str(self.hermes), "--port", str(self.port), "--metrics-port", str(self.metrics),
-                              "--workspace", str(self.root), "--timeout", "3", input="correct-test-password\n", check=False)
+                              "--workspace", str(self.root), "--timeout", str(FIXTURE_STARTUP), input="correct-test-password\n", check=False)
         self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "dumbpipe.process.json").exists())
+
+    def test_clone_setup_prepares_and_starts_a_managed_host(self):
+        result = subprocess.run([sys.executable, str(ROOT / "tools/setup.py"), "--mode", "host",
+                                 "--username", "setupuser", "--password-stdin", "--state-dir", str(self.state),
+                                 "--hermes-bin", str(self.hermes), "--dumbpipe-bin", str(self.dumbpipe),
+                                 "--port", str(self.port), "--metrics-port", str(self.metrics), "--workspace", str(self.root)],
+                                input="setup-test-password\n", capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Connection ready", result.stdout)
+        self.assertNotIn("setup-test-password", result.stdout + result.stderr)
+        self.assertEqual(json.loads(self.run_cli("status", "--json").stdout)["phase"], "online")
+        self.run_cli("off")
+        self.run_cli("on")
+        self.assertEqual(json.loads(self.run_cli("status", "--json").stdout)["transport"], "iroh")
+
+    def test_client_setup_can_prepare_without_hermes_or_starting_a_process(self):
+        result = subprocess.run([sys.executable, str(ROOT / "tools/setup.py"), "--mode", "client", "--prepare-only",
+                                 "--hermes-bin", "not-installed-hermes-fixture", "--dumbpipe-bin", str(self.dumbpipe)],
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Transport ready", result.stdout)
         self.assertFalse((self.root / "dumbpipe.process.json").exists())
 
     def test_paired_configuration_is_not_overwritten_by_local_test(self):

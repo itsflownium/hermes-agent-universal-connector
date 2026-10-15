@@ -77,6 +77,33 @@ Run `node service/server.mjs` with Node 22+, or build the optional container wit
 connector and needs a persistent `/data` volume. The container build has not been
 executed in this workspace.
 
+To prepare a checkout for an account server:
+
+```sh
+./setup --prepare-only
+mkdir -p work
+cp service/operator.env.example work/operator.env
+chmod 600 work/operator.env
+```
+
+Edit `work/operator.env`: set `FLOWNIUM_ORIGIN` to the server's HTTPS origin and
+`FLOWNIUM_IROH_BIN` to the absolute path of `work/bin/dumbpipe`. Set the GitHub
+OAuth app values for provider sign-in; Cloudflare values and the workspace domain
+can remain empty for Iroh. Then start the server with Node's built-in env loader:
+
+```sh
+node --env-file=work/operator.env service/server.mjs
+```
+
+Use an HTTPS reverse proxy or hosting provider in front of this process, with
+HTTP streaming and WebSocket upgrades enabled. The default listener is loopback;
+set `BIND_HOST=0.0.0.0` only when the deployment network requires it. Persist
+`FLOWNIUM_SERVICE_DATA`. `/health` reports which integrations are configured.
+On each Hermes computer, run `./setup --mode account --server <HTTPS-origin>`,
+complete the browser pairing, and keep the computer online. Setup starts the
+transport after approval. Subsequent `./flownium off` and `./flownium on` reuse
+that computer's saved configuration.
+
 Supply GitHub OAuth settings only when enabling provider-account pairing. Its
 callback is `<FLOWNIUM_ORIGIN>/auth/callback`. Supply Cloudflare settings only when
 enabling the optional Cloudflare transport. Do not put credentials into source,

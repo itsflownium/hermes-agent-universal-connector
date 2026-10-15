@@ -13,9 +13,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const state = mkdtempSync(join(tmpdir(), 'flownium-real-gateway-'));
 const binary = process.env.FLOWNIUM_IROH_BIN || 'dumbpipe';
 const python = process.env.FLOWNIUM_TEST_PYTHON || 'python3';
-function command(args, input) {
+function command(args, input, script = join(root, 'flownium_cli.py')) {
   return new Promise((done, reject) => {
-    const child = spawn(python, [join(root, 'flownium_cli.py'), '--state-dir', state, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(python, [script, '--state-dir', state, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
     let output = '', error = '';
     child.stdout.on('data', data => output += data); child.stderr.on('data', data => error += data);
     child.on('error', reject); child.on('close', code => code ? reject(new Error(error || 'Controller failed')) : done(output));
@@ -26,8 +26,8 @@ const port = () => new Promise(done => { const server = http.createServer(); ser
 let server, gateway;
 try {
   const password = randomBytes(24).toString('base64url');
-  await command(['share', '--username', 'gatewaytest', '--password-stdin', '--dumbpipe-bin', binary,
-    '--port', String(await port()), '--metrics-port', String(await port()), '--timeout', '120'], password + '\n');
+  await command(['--mode', 'host', '--username', 'gatewaytest', '--password-stdin', '--dumbpipe-bin', binary,
+    '--port', String(await port()), '--metrics-port', String(await port())], password + '\n', join(root, 'tools/setup.py'));
   const stateInfo = JSON.parse(await command(['status', '--json']));
   const device = { id: randomUUID(), irohTicket: stateInfo.iroh_ticket };
   const gatewayPort = await port(), origin = `http://127.0.0.1:${gatewayPort}`;
@@ -53,7 +53,7 @@ try {
   assert.equal((await fetch(base + '/api/auth/me', { headers: { Cookie: cookie } })).status, 200);
   const chat = await fetch(base + '/chat', { headers: { Cookie: cookie } });
   assert.equal(chat.status, 200); assert.match(await chat.text(), /<html/i);
-  console.log(JSON.stringify({ real_hermes: true, real_iroh: true, real_http_gateway: true,
+  console.log(JSON.stringify({ clone_setup_entrypoint: true, real_hermes: true, real_iroh: true, real_http_gateway: true,
     hermes_version: status.version, wrong_password_rejected: true, authenticated_chat_page_served: true, path_routing_verified: true,
     domain_or_cloudflare_used: false, model_inference_tested: false, cross_region_tested: false }));
 } finally {

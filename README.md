@@ -5,6 +5,75 @@ Iroh is the primary transport; Cloudflare Tunnel is optional and can be configur
 later. No custom web interface is included. The browser pages in the account
 service are limited to OAuth/device-pairing consent.
 
+## Clone and set up
+
+On the computer that already has Hermes Agent installed and configured:
+
+```sh
+git clone --branch hermes-agent-iroh-backend https://github.com/itsflownium/hermes-agent-universal-connector.git
+cd hermes-agent-universal-connector
+./setup
+```
+
+Choose **Share Hermes on this computer**, enter a username and a strong password,
+and keep the printed endpoint ticket. Setup downloads the checksum-verified Iroh
+transport into this checkout and starts a dedicated Hermes connection. It needs
+Git and Python 3.10+; it does not install global packages or change your shell.
+The branch argument selects this implementation while the backend PR is unmerged.
+
+On the other computer, clone the same repository and run:
+
+```sh
+./setup --mode client
+```
+
+Paste the endpoint ticket, then sign in at the printed local URL with the host's
+username and password. This client computer does not need Hermes installed.
+Leave its command running to keep the connection open.
+
+For an already deployed provider-account service, use
+`./setup --mode account --server https://your-service-host` on the Hermes computer.
+Setup opens device pairing and starts the connection after approval. Provider
+sign-in requires the operator's configured service; private Iroh sharing works now.
+
+Use `./setup --check` to inspect prerequisites without changes, or
+`./setup --prepare-only` to prepare the transport before an interactive setup.
+`./flownium off`, `./flownium on`, and `./flownium status` manage the saved connection.
+Run `./setup --help` for an existing transport path, Hermes profile, workspace,
+ports, state directory, or noninteractive password input.
+
+## How the connection works
+
+Hermes Agent continues running on your own computer, with its existing models,
+tools, files and configuration. Flownium manages a dedicated dashboard process
+and an encrypted Iroh connection. Your computer must stay awake and online.
+
+There are two ways to reach it:
+
+- **Direct access:** run `flownium share` on the Hermes computer, then
+  `flownium access <ticket>` on the connecting computer. The access command
+  opens a local browser URL that travels over Iroh to the real Hermes dashboard.
+  Hermes checks the sharing username and password. This works without a domain
+  or a hosted account service; the connecting device needs the access client.
+- **Website access:** deploy the account service once, then pair the Hermes
+  computer using `flownium login`. GitHub sign-in establishes account ownership.
+  The computer advertises its Iroh endpoint to the service, whose gateway forwards
+  browser requests to Hermes after checking the owner. Native Hermes signs in
+  through the service's OIDC provider. A hosting provider's HTTPS address and a
+  per-device path work without buying a domain; personal subdomains are optional.
+
+```mermaid
+flowchart LR
+  B[Browser on another device] -->|HTTPS and account sign-in| G[Flownium account service and gateway]
+  G -->|Encrypted Iroh connection| C[Connector on your computer]
+  C -->|Loopback HTTP and WebSocket| H[Real Hermes Agent dashboard and TUI]
+```
+
+`flownium on` starts the saved connection; `flownium off` closes the transport and
+its managed Hermes dashboard. If authentication disappears, a managed child exits,
+or the platform revokes the paired device, the controller disables remote access.
+No agent runs on the account server, and model API keys stay with Hermes.
+
 ## Use it now: Iroh and a password
 
 Requires Python 3.10+, an existing Hermes installation, and the official Iroh
