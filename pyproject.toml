@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
+nectit = "flownium_cli:main"
 flownium = "flownium_cli:main"
 
 [tool.setuptools]

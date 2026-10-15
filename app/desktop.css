@@ -1,0 +1,75 @@
+/* The workspace itself is Hermes' current stylesheet, served from the laptop. */
+#nectit-controls {
+  position: fixed;
+  right: 12px;
+  bottom: 29px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 9px;
+  border: 1px solid #ffffff15;
+  border-radius: 6px;
+  background: #181818ee;
+  color: #aaa;
+  font: 11px system-ui;
+}
+#nectit-controls a {
+  color: #b7d7cd;
+  text-decoration: none;
+  font-weight: 650;
+  letter-spacing: -0.2px;
+}
+#nectit-controls button {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+#nectit-controls button:hover {
+  color: white;
+}
+#nectit-notice {
+  position: fixed;
+  top: 45px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10001;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 16px;
+  background: #20312b;
+  border: 1px solid #7bafa055;
+  border-radius: 9px;
+  color: #e1eee8;
+  font: 13px system-ui;
+  box-shadow: 0 6px 30px #0004;
+}
+#nectit-notice button {
+  border: 0;
+  border-radius: 5px;
+  background: #b7d7cd;
+  color: #14221c;
+  padding: 7px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+@media (max-width: 600px) {
+  #nectit-controls {
+    bottom: 5px;
+    right: 8px;
+  }
+  #nectit-notice {
+    gap: 10px;
+    font-size: 12px;
+  }
+}
+
+/* OS floating windows have no equivalent in a browser tab. */
+button[aria-label="HUD mode"] {
+  display: none;
+}

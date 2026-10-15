@@ -21,3 +21,5 @@ iroh-client-key.json
 gateway-iroh-key
 control.sock
 *.log
+.playwright-cli/
+output/playwright/

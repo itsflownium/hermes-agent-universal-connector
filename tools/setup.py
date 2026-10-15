@@ -21,7 +21,8 @@ def parser():
     result.add_argument("--hermes-bin", default="hermes")
     result.add_argument("--dumbpipe-bin", help="Use an existing Iroh dumbpipe executable")
     result.add_argument("--state-dir")
-    result.add_argument("--username")
+    result.add_argument("--email", "--username", dest="username")
+    result.add_argument("--desktop", action="store_true", help="Prepare the Hermes Desktop renderer for the Nectit web workspace")
     result.add_argument("--password-stdin", action="store_true")
     result.add_argument("--ticket", help="Endpoint ticket from the hosting computer")
     result.add_argument("--server", help="Deployed account-service origin, for account mode")
@@ -54,13 +55,13 @@ def main(argv=None):
         binary = existing(args.dumbpipe_bin) if args.dumbpipe_bin else existing(str(ROOT / "work/bin/dumbpipe")) or existing("dumbpipe")
         if args.dumbpipe_bin and not binary:
             raise ValueError("The supplied dumbpipe executable does not exist or is not executable.")
-        print("Flownium connector for Hermes Agent", flush=True)
+        print("Nectit connector for Hermes Agent", flush=True)
         if args.check:
             print(f"Python: {sys.version.split()[0]}\nHermes: {hermes or 'not installed'}\nIroh: {binary or 'not prepared; run ./setup'}")
             return 0 if binary and (hermes or args.mode == "client") else 1
         mode = args.mode
         if not mode and not args.prepare_only:
-            print("1. Share Hermes on this computer\n2. Connect to another computer\n3. Pair with a hosted Flownium account")
+            print("1. Share Hermes on this computer\n2. Connect to another computer\n3. Pair with a hosted Nectit account")
             mode = {"1": "host", "2": "client", "3": "account"}.get(ask("Choose 1, 2, or 3:"))
             if not mode:
                 raise ValueError("Choose a setup mode: host, client, or account.")
@@ -81,8 +82,10 @@ def main(argv=None):
             command += ["access", ticket, "--dumbpipe-bin", binary]
         else:
             if mode == "host":
-                username = args.username or ask("Choose a sharing username:")
-                command += ["share", "--username", username]
+                username = args.username or ask("Sharing email address:")
+                command += ["share", "--email", username]
+                if args.desktop:
+                    command.append("--desktop")
                 if args.password_stdin:
                     command.append("--password-stdin")
             else:
@@ -107,10 +110,12 @@ def main(argv=None):
             if code:
                 return code
         if mode != "client":
-            launcher = [str(ROOT / "flownium"), *(["--state-dir", args.state_dir] if args.state_dir else [])]
+            launcher = [str(ROOT / "nectit"), *(["--state-dir", args.state_dir] if args.state_dir else [])]
             print("\nConnection ready. Manage it with:", flush=True)
             for action in ("status", "off", "on", "doctor"):
                 print("  " + shlex.join([*launcher, action]))
+            if args.desktop:
+                print("Open the desktop website with: ./nectit app")
             print("Keep this computer awake and online. Existing independent Hermes sessions are preserved.")
         return 0
     except (ValueError, OSError, subprocess.CalledProcessError) as error:

@@ -1,4 +1,4 @@
-name: Backend checks
+name: Nectit checks
 on:
   push:
     branches: [main]
@@ -29,4 +29,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test service/core.test.mjs service/iroh-gateway.test.mjs
+      - run: node --test service/core.test.mjs service/iroh-gateway.test.mjs app/auth.test.mjs app/server.test.mjs
