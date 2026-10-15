@@ -30,7 +30,7 @@ let profile,
   notice = "",
   toastTimer;
 const clone =
-  "git clone --branch hermes-agent-local-app https://github.com/itsflownium/hermes-agent-universal-connector.git";
+  "git clone https://github.com/itsflownium/hermes-agent-universal-connector.git";
 const setup = "cd hermes-agent-universal-connector && ./setup --desktop";
 async function api(path, data) {
   const response = await fetch(

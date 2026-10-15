@@ -326,7 +326,7 @@ Server(('127.0.0.1', port), Handler).serve_forever()
                 elif handler.path == "/v1/cli/token":
                     response = {"access_token": "fixture-account-token"}
                 else:
-                    response = {"device_id": "assigned-device", "hostname": "arhaan.flownium.test",
+                    response = {"device_id": "assigned-device", "hostname": "demo.flownium.test",
                                 "tunnel_token": "fixture-tunnel-token"}
                 body = json.dumps(response).encode()
                 handler.send_response(200)
@@ -345,11 +345,11 @@ Server(('127.0.0.1', port), Handler).serve_forever()
                                   "--no-browser", "--port", str(self.port), "--metrics-port", str(self.metrics),
                                   "--hermes-bin", str(self.hermes), "--cloudflared-bin", str(self.cloudflared),
                                   "--workspace", str(self.root))
-            self.assertIn("arhaan.flownium.test", result.stdout)
+            self.assertIn("demo.flownium.test", result.stdout)
             self.assertNotIn("fixture-account-token", result.stdout + result.stderr)
             self.assertNotIn("fixture-tunnel-token", result.stdout + result.stderr)
             config = json.loads((self.state / "config.json").read_text())
-            self.assertEqual(config["hostname"], "arhaan.flownium.test")
+            self.assertEqual(config["hostname"], "demo.flownium.test")
             self.assertEqual(received[-1][2], "Bearer fixture-account-token")
             self.assertEqual((self.state / "session.json").stat().st_mode & 0o777, 0o600)
             self.assertEqual((self.state / "tunnel-token").stat().st_mode & 0o777, 0o600)
