@@ -20,8 +20,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { IrohGateway } from "../service/iroh-gateway.mjs";
-import { githubProvider } from "../service/core.mjs";
-import { emailAddress, googleProvider } from "./auth.mjs";
+import { emailAddress } from "./auth.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -40,8 +39,6 @@ export function createLocalApp({
   binary = process.env.FLOWNIUM_IROH_BIN || join(root, "work/bin/dumbpipe"),
   python = process.env.FLOWNIUM_PYTHON || "python3",
   port = 8788,
-  providerFactory = null,
-  googleFactory = null,
   publicOrigin = process.env.NECTIT_PUBLIC_ORIGIN || null,
 } = {}) {
   if (publicOrigin) {
@@ -66,32 +63,7 @@ export function createLocalApp({
     : {};
   const sessions = new Map(),
     sockets = new Set(),
-    oauth = new Map(),
     attempts = new Map();
-  const providers = {
-    github:
-      !!providerFactory ||
-      !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET),
-    google:
-      !!googleFactory ||
-      !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-  };
-  const provider = (name, origin) =>
-    name === "google"
-      ? googleFactory
-        ? googleFactory(origin)
-        : googleProvider({
-            origin,
-            clientId: process.env.GOOGLE_CLIENT_ID,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-          })
-      : providerFactory
-        ? providerFactory(origin)
-        : githubProvider({
-            origin,
-            clientId: process.env.GITHUB_CLIENT_ID,
-            clientSecret: process.env.GITHUB_CLIENT_SECRET,
-          });
   const destination = () =>
     settings.setupComplete ? "/w/" + settings.slug : "/setup/address";
   const cookieValue = (request, name) =>
@@ -101,10 +73,8 @@ export function createLocalApp({
       .find((c) => c.startsWith(name + "="))
       ?.slice(name.length + 1);
   // Cookies are host-scoped, not port-scoped. Keep independent local routers
-  // from overwriting each other's login and OAuth browser bindings.
+  // from overwriting each other's login.
   const sessionName = () => `nectit-session-${server.address().port}`;
-  const oauthName = (provider) =>
-    `nectit-oauth-${provider}-${server.address().port}`;
   const sessionCookie = () => {
     for (const [key, expires] of sessions)
       if (expires < Date.now()) sessions.delete(key);
@@ -393,20 +363,6 @@ export function createLocalApp({
     });
     response.end(JSON.stringify(value));
   };
-  function authWindow(response, provider, result, cookies = [], status = 200) {
-    response.writeHead(status, {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-      "X-Content-Type-Options": "nosniff",
-      "Referrer-Policy": "no-referrer",
-      "Content-Security-Policy":
-        "default-src 'self'; script-src 'self'; style-src 'self'; base-uri 'none'; frame-ancestors 'none'",
-      ...(cookies.length ? { "Set-Cookie": cookies } : {}),
-    });
-    response.end(
-      `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="nectit-auth-result" content="${result}"><meta name="nectit-auth-provider" content="${provider}"><title>Sign in · Nectit</title><link rel="stylesheet" href="/style.css"><script type="module" src="/auth-window.js"></script></head><body><main class="auth-window"><div class="auth-card"><span class="auth-brand">nectit</span><h1></h1><p id="explanation"></p>${result === "configuration" ? '<code>work/local-app.env</code><p class="field-hint">Use app/local.env.example for the keys and exact callback URL. Provider secrets stay on the server.</p>' : ""}<button id="return" class="primary">Return to Nectit</button></div></main></body></html>`,
-    );
-  }
   const server = http.createServer(async (request, response) => {
     try {
       const currentOrigin = origin(request),
@@ -416,139 +372,6 @@ export function createLocalApp({
         throw fail("Invalid path.");
       if (request.method !== "GET" && request.headers.origin !== currentOrigin)
         throw fail("Reload this page before submitting.", 403);
-      const loginProvider =
-        path === "/login" || path === "/login/github"
-          ? "github"
-          : path === "/login/google"
-            ? "google"
-            : null;
-      if (loginProvider && request.method === "GET") {
-        if (!providers[loginProvider]) {
-          if (url.searchParams.get("popup") === "1") {
-            authWindow(response, loginProvider, "configuration", [], 503);
-            return;
-          }
-          response.writeHead(302, {
-            Location: "/setup/account?notice=" + loginProvider,
-            "Cache-Control": "no-store",
-          });
-          response.end();
-          return;
-        }
-        rate("oauth");
-        for (const [key, flow] of oauth)
-          if (flow.expires < Date.now()) oauth.delete(key);
-        const state = randomBytes(32).toString("base64url"),
-          verifier = randomBytes(32).toString("base64url"),
-          binding = randomBytes(32).toString("base64url");
-        oauth.set(hash(state), {
-          verifier,
-          provider: loginProvider,
-          popup: url.searchParams.get("popup") === "1",
-          binding: hash(binding),
-          origin: currentOrigin,
-          expires: Date.now() + 600_000,
-        });
-        response.writeHead(302, {
-          Location: provider(loginProvider, currentOrigin).authorize(
-            state,
-            verifier,
-          ),
-          "Cache-Control": "no-store",
-          "Set-Cookie": `${oauthName(loginProvider)}=${binding}; HttpOnly; SameSite=Lax; Path=/; Max-Age=600${secureCookie}`,
-        });
-        response.end();
-        return;
-      }
-      const callbackProvider =
-        path === "/auth/callback"
-          ? "github"
-          : path === "/auth/google/callback"
-            ? "google"
-            : null;
-      if (callbackProvider && request.method === "GET") {
-        const key = hash(url.searchParams.get("state") || ""),
-          flow = oauth.get(key),
-          binding = cookieValue(request, oauthName(callbackProvider));
-        if (
-          !flow ||
-          flow.provider !== callbackProvider ||
-          flow.expires < Date.now() ||
-          flow.origin !== currentOrigin ||
-          !binding ||
-          hash(binding) !== flow.binding
-        )
-          throw fail("Sign-in expired. Start again.", 401);
-        oauth.delete(key);
-        if (url.searchParams.has("error") || !url.searchParams.get("code")) {
-          if (flow.popup) {
-            authWindow(response, callbackProvider, "cancelled");
-            return;
-          }
-          response.writeHead(302, {
-            Location: "/setup/account?notice=cancelled",
-          });
-          response.end();
-          return;
-        }
-        let identity;
-        try {
-          identity = await provider(callbackProvider, currentOrigin).identity(
-            url.searchParams.get("code"),
-            flow.verifier,
-          );
-        } catch {
-          if (flow.popup) {
-            authWindow(response, callbackProvider, "failed", [], 401);
-            return;
-          }
-          throw fail(
-            "Your provider could not verify this sign-in. Try again.",
-            401,
-          );
-        }
-        const email = emailAddress(identity.email);
-        if (!email || !identity.id)
-          throw fail(
-            "Your provider must supply a verified email address.",
-            403,
-          );
-        if (
-          settings.account &&
-          (settings.account.provider !== callbackProvider ||
-            settings.account.id !== identity.id)
-        )
-          throw fail(
-            "This local workspace belongs to a different account.",
-            403,
-          );
-        if (!settings.account) {
-          settings.account = {
-            email,
-            id: identity.id,
-            provider: callbackProvider,
-          };
-          settings.slug = "my-hermes";
-          save();
-        }
-        if (flow.popup) {
-          authWindow(response, callbackProvider, "success", [
-            sessionCookie(),
-            `${oauthName(callbackProvider)}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureCookie}`,
-          ]);
-          return;
-        }
-        response.writeHead(302, {
-          Location: destination(),
-          "Cache-Control": "no-store",
-          "Set-Cookie": [
-            sessionCookie(),
-            `${oauthName(callbackProvider)}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureCookie}`,
-          ],
-        });
-        response.end();
-        return;
-      }
       if (path === "/local/bootstrap" && request.method === "GET") {
         let signedIn = false;
         try {
@@ -562,8 +385,6 @@ export function createLocalApp({
           email: signedIn ? settings.account.email : "",
           setupComplete: signedIn && !!settings.setupComplete,
           slug: signedIn ? settings.slug : "",
-          accountProvider: settings.account?.provider || "local",
-          providers,
           localOnly: !publicOrigin,
         });
         return;
@@ -585,7 +406,6 @@ export function createLocalApp({
           const salt = randomBytes(16).toString("hex");
           settings.account = {
             email,
-            provider: "local",
             salt,
             digest: scryptSync(input.password, salt, 32).toString("hex"),
           };
@@ -791,7 +611,6 @@ export function createLocalApp({
       const staticFiles = {
         "/desktop-bridge.js": ["desktop-bridge.js", "text/javascript"],
         "/desktop.css": ["desktop.css", "text/css"],
-        "/auth-window.js": ["auth-window.js", "text/javascript"],
         "/app.js": ["app.js", "text/javascript"],
         "/style.css": ["style.css", "text/css"],
         "/assets/favicon.svg": ["assets/favicon.svg", "image/svg+xml"],

@@ -14,14 +14,14 @@ cd hermes-agent-universal-connector
 ```
 
 Requires Node.js 22+, Python 3.10+ and an installed Hermes Desktop build. Three
-setup pages handle email/GitHub/Google sign-in, your workspace URL and the
+setup pages handle email/password sign-up and sign-in, your workspace URL and the
 computer connection. Completed sign-in opens the **actual installed Hermes
 Desktop interface**: chat tabs, session history, model controls, capabilities and
 settings. Nectit loads its current assets from your computer instead of copying
 the UI. Update Hermes there and reload/reopen the workspace to use that build.
 
-The preview starts signed out at `http://127.0.0.1:8788`. Email/password works
-locally; GitHub and Google require the operator's OAuth app credentials.
+The preview starts signed out at `http://127.0.0.1:8788`. Create your account
+with an email and password; return with the same credentials to sign in.
 Nothing is deployed by these commands. Any-device browser access needs a reachable
 HTTPS gateway; Iroh links that gateway to your laptop. See [app setup and gateway
 configuration](app/README.md) for the complete flow, updates and current limits.
@@ -40,7 +40,7 @@ Choose **Share Hermes on this computer**, enter an email address and a strong pa
 and keep the printed endpoint ticket. Setup downloads the checksum-verified Iroh
 transport into this checkout and starts a dedicated Hermes connection. It needs
 Git and Python 3.10+; it does not install global packages or change your shell.
-The branch argument selects this implementation while the backend PR is unmerged.
+The branch argument selects this implementation while the website PR is unmerged.
 
 On the other computer, clone the same repository and run:
 

@@ -181,56 +181,6 @@ test("all three setup routes and local workspace serve without external scripts"
   }
 });
 
-test("configured GitHub sign-in binds OAuth state to the browser and the workspace owner", async () => {
-  let identity = { id: "github:test-owner", email: "gitowner@example.com" };
-  const f = await fixture({
-    providerFactory: () => ({
-      authorize: (state) =>
-        "https://github.com/login/oauth/authorize?state=" + state,
-      identity: async () => identity,
-    }),
-  }); // External identity is an explicit fixture.
-  try {
-    assert.equal(
-      (await (await f.request("/local/bootstrap")).json()).providers.github,
-      true,
-    );
-    const begin = await f.request("/login"),
-      state = new URL(begin.headers.get("location")).searchParams.get("state");
-    const binding = begin.headers.get("set-cookie").split(";")[0],
-      path = "/auth/callback?code=fixture&state=" + state;
-    assert.equal((await f.request(path)).status, 401);
-    const callback = await f.request(path, null, binding);
-    assert.equal(callback.status, 302);
-    const cookie = callback.headers
-      .getSetCookie()
-      .find((value) => value.startsWith("nectit-session-"))
-      .split(";")[0];
-    assert.equal(
-      (await (await f.request("/local/bootstrap", null, cookie)).json()).email,
-      "gitowner@example.com",
-    );
-    assert.equal((await f.request(path, null, binding)).status, 401);
-    identity = { id: "github:other-owner", email: "someone@example.com" };
-    const other = await f.request("/login"),
-      otherState = new URL(other.headers.get("location")).searchParams.get(
-        "state",
-      );
-    assert.equal(
-      (
-        await f.request(
-          "/auth/callback?code=fixture&state=" + otherState,
-          null,
-          other.headers.get("set-cookie").split(";")[0],
-        )
-      ).status,
-      403,
-    );
-  } finally {
-    await f.close();
-  }
-});
-
 test("fresh visits stay signed out; completed email sign-in returns directly to the workspace", async () => {
   const f = await fixture();
   try {
@@ -287,70 +237,6 @@ test("fresh visits stay signed out; completed email sign-in returns directly to 
         )
       ).status,
       400,
-    );
-  } finally {
-    await f.close();
-  }
-});
-
-test("Google OAuth is provider-bound, rejects foreign owners and returns completed owners to Hermes", async () => {
-  let identity = { id: "google:owner", email: "owner@example.com" };
-  const provider = (name) => () => ({
-    authorize: (state) =>
-      "https://accounts.google.com/authorize?state=" + state,
-    identity: async () => ({ ...identity, id: name + ":owner" }),
-  });
-  const f = await fixture({
-    googleFactory: provider("google"),
-    providerFactory: provider("github"),
-  });
-  try {
-    const begin = await f.request("/login/google");
-    const state = new URL(begin.headers.get("location")).searchParams.get(
-      "state",
-    );
-    const binding = begin.headers.get("set-cookie").split(";")[0];
-    assert.equal(
-      (
-        await f.request(
-          "/auth/callback?code=test&state=" + state,
-          null,
-          binding,
-        )
-      ).status,
-      401,
-    );
-    const correct = await f.request(
-      "/auth/google/callback?code=test&state=" + state,
-      null,
-      binding,
-    );
-    assert.equal(correct.headers.get("location"), "/setup/address");
-    assert.equal(f.app.settings.account.email, "owner@example.com");
-    f.app.settings.setupComplete = true;
-    const start = await f.request("/login/google");
-    const value = new URL(start.headers.get("location")).searchParams.get(
-      "state",
-    );
-    assert.equal(
-      (
-        await f.request(
-          "/auth/google/callback?code=test&state=" + value,
-          null,
-          start.headers.get("set-cookie").split(";")[0],
-        )
-      ).headers.get("location"),
-      "/w/my-hermes",
-    );
-    assert.equal(
-      (
-        await f.request(
-          "/auth/google/callback?code=test&state=" + value,
-          null,
-          binding,
-        )
-      ).status,
-      401,
     );
   } finally {
     await f.close();
@@ -492,51 +378,23 @@ test("independent routers on different ports keep browser sessions isolated", as
   }
 });
 
-test("provider popup completes OAuth with a real session cookie and a same-origin completion page", async () => {
-  const f = await fixture({
-    googleFactory: () => ({
-      authorize: (state) =>
-        "https://accounts.google.com/authorize?state=" + state,
-      identity: async () => ({
-        id: "google:popup-owner",
-        email: "owner@example.com",
-      }),
-    }),
-  });
+
+test("local account has no external provider sign-in endpoints", async () => {
+  const f = await fixture();
   try {
-    const begin = await f.request("/login/google?popup=1");
-    assert.equal(
-      new URL(begin.headers.get("location")).hostname,
-      "accounts.google.com",
-    );
-    const state = new URL(begin.headers.get("location")).searchParams.get(
-      "state",
-    );
-    const response = await f.request(
-      "/auth/google/callback?code=test&state=" + state,
-      null,
-      begin.headers.get("set-cookie").split(";")[0],
-    );
-    assert.equal(response.status, 200);
-    const html = await response.text();
-    assert.match(html, /nectit-auth-result" content="success"/);
-    assert.match(html, /src="\/auth-window.js"/);
-    assert.ok(!html.includes("test-secret"));
-    const cookie = response.headers
-      .getSetCookie()
-      .find((value) => value.startsWith("nectit-session-"))
-      .split(";")[0];
-    assert.equal(
-      (await (await f.request("/local/bootstrap", null, cookie)).json())
-        .signedIn,
-      true,
-    );
-    const unconfigured = await f.request("/login/github?popup=1");
-    assert.equal(unconfigured.status, 503);
-    assert.match(
-      await unconfigured.text(),
-      /nectit-auth-result" content="configuration"/,
-    );
+    for (const path of [
+      "/login",
+      "/login/github",
+      "/login/google",
+      "/auth/callback",
+      "/auth/google/callback",
+      "/auth-window.js",
+    ])
+      assert.equal((await f.request(path)).status, 404);
+    const bootstrap = await (await f.request("/local/bootstrap")).json();
+    assert.equal(bootstrap.configured, false);
+    assert.equal(bootstrap.signedIn, false);
+    assert.equal(bootstrap.providers, undefined);
   } finally {
     await f.close();
   }

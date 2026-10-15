@@ -27,8 +27,8 @@ The `flownium` launcher remains a compatibility alias.
 
 The three setup pages are:
 
-1. **Account:** create a local email/password account or sign in with GitHub/Google
-   when the operator has configured that provider. A fresh visit stays signed out.
+1. **Account:** create your email/password account on first setup. Return with
+   the same email and password to sign in. A fresh visit stays signed out.
 2. **Your URL:** choose `/w/<name>`. Locally this is an address on this computer;
    it does not reserve a subdomain or register DNS.
 3. **Computer:** connect this computer, or paste another computer's endpoint
@@ -76,27 +76,18 @@ OS-only features such as HUD windows, tray controls and native dialogs are not
 browser features. HUD is hidden; unsupported native actions fail explicitly.
 Browser-compatible Hermes REST/JSON-RPC features are forwarded to the real host.
 
-## Email, GitHub and Google sign-in
+## Email and password
 
-Email/password works immediately and stores a salted scrypt hash. This local
-prototype has one owner per data directory. It has no mail delivery, email
-verification or password-reset service. Use a separate data directory for a
-different owner; provider identities are never linked just because emails match.
+Create your account with an email address and a password of at least 12
+characters. Later visits show **Sign in** and open the configured Hermes
+workspace after authentication. Passwords are stored as salted scrypt hashes.
+No external sign-in registration or provider credentials are needed.
 
-For OAuth, copy `app/local.env.example` to the ignored `work/local-app.env` and
-set your own provider client ID/secret. Register exact callbacks:
-
-- GitHub: `http://127.0.0.1:8788/auth/callback`
-- Google: `http://127.0.0.1:8788/auth/google/callback`
-
-```sh
-node --env-file=work/local-app.env app/server.mjs
-```
-
-Both provider buttons open a sign-in popup. A configured provider redirects to its real authorization page; successful OAuth closes the popup and returns the main window to URL setup or the completed Hermes workspace. Origin/source-checked postMessage and session polling handle popup isolation, with same-tab fallback if popups are blocked. An unconfigured provider explains the missing configuration in the popup instead of simulating sign-in. `./nectit app` also loads `work/local-app.env` automatically when it exists. Authorization uses state, PKCE,
-provider-specific browser binding and a stable provider ID. Only verified provider
-email addresses are accepted. Live provider authentication needs your registered
-OAuth clients; automated tests use explicit provider fixtures.
+This local prototype has one owner per data directory. It has no mail delivery,
+email verification or password-reset service. Use a separate data directory for
+a different owner. Optional router settings can go in the ignored
+`work/local-app.env` using `app/local.env.example`; `./nectit app` loads it
+automatically when present.
 
 ## Browser access on any device
 
@@ -113,8 +104,8 @@ Your awake laptop → Hermes backend + current desktop renderer
 
 Complete the owner account setup locally before exposing a gateway. The same app can run on a gateway machine with `NECTIT_PUBLIC_ORIGIN` set to its
 actual HTTPS origin. Put it behind a TLS reverse proxy preserving `Host` and
-WebSocket upgrades to `127.0.0.1:8788`, configure the OAuth callbacks at that
-origin, and use **Another computer** to connect the laptop. Cookies then require
+WebSocket upgrades to `127.0.0.1:8788`, and use **Another computer** to
+connect the laptop. Cookies then require
 HTTPS. A hosting provider's HTTPS address is sufficient; your own subdomain can
 be added later. This PR does not deploy a gateway, create DNS or claim that the
 localhost preview is already reachable from the internet.
@@ -127,7 +118,7 @@ platform work, not functionality simulated by this local preview.
 ## Development and private data
 
 ```sh
-node --test app/auth.test.mjs app/server.test.mjs
+node --test app/server.test.mjs
 ```
 
 App state and the native session cookie are private files under `work/local-app`
