@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import signal
 import socket
+import socketserver
 import subprocess
 import sys
 import tempfile
@@ -37,6 +38,15 @@ def wait_for(predicate, timeout=8):
     raise AssertionError("Condition was not reached before timeout")
 
 
+class FixtureHTTPServer(http.server.HTTPServer):
+    def server_bind(self):
+        # HTTPServer otherwise reverse-resolves 127.0.0.1 before serving. Hosted
+        # macOS DNS can stall that lookup; these loopback fixtures need no DNS.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
+
 class HostTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="flownium-", dir="/tmp")
@@ -48,7 +58,7 @@ class HostTests(unittest.TestCase):
         self.cloudflared = self.root / "cloudflared"
         self.dumbpipe = self.root / "dumbpipe"
         source = '''#!PYTHON
-import http.server, json, os, signal, sys
+import http.server, json, os, signal, socketserver, sys
 from pathlib import Path
 root = Path(__file__).parent
 kind = Path(__file__).name
@@ -83,7 +93,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
+class Server(http.server.HTTPServer):
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = 'localhost', self.server_address[1]
+Server(('127.0.0.1', port), Handler).serve_forever()
 '''.replace("PYTHON", sys.executable, 1)
         for path in (self.hermes, self.cloudflared, self.dumbpipe):
             path.write_text(source)
@@ -294,7 +308,7 @@ http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
             def log_message(self, *args):
                 pass
 
-        account = http.server.HTTPServer(("127.0.0.1", 0), AccountFixture)
+        account = FixtureHTTPServer(("127.0.0.1", 0), AccountFixture)
         thread = threading.Thread(target=account.serve_forever, daemon=True)
         thread.start()
         try:

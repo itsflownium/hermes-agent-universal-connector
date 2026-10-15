@@ -1,9 +1,16 @@
 name: Backend checks
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   host:
+    timeout-minutes: 10
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -15,6 +22,7 @@ jobs:
           python-version: '3.13'
       - run: python -m unittest discover -s tests -p test_cli.py -v
   service:
+    timeout-minutes: 5
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
