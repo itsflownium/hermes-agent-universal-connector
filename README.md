@@ -1,25 +1,46 @@
 # Hermes Agent Universal Connector
 
-Flownium's **backend-only** connector for real Hermes Agent installations.
-Iroh is the primary transport; Cloudflare Tunnel is optional and can be configured
-later. No custom web interface is included. The browser pages in the account
-service are limited to OAuth/device-pairing consent.
+Nectit connects to real Hermes Agent installations through Iroh, with an optional
+Cloudflare transport. Start from the terminal, then open the local desktop-style
+workspace. Your agent keeps running on your own computer.
 
-## Clone and set up
+## Open the Nectit web workspace
+
+```sh
+git clone --branch hermes-agent-local-app https://github.com/itsflownium/hermes-agent-universal-connector.git
+cd hermes-agent-universal-connector
+./setup --desktop
+./nectit app
+```
+
+Requires Node.js 22+, Python 3.10+ and an installed Hermes Desktop build. Three
+setup pages handle email/password sign-up and sign-in, your workspace URL and the
+computer connection. Completed sign-in opens the **actual installed Hermes
+Desktop interface**: chat tabs, session history, model controls, capabilities and
+settings. Nectit loads its current assets from your computer instead of copying
+the UI. Update Hermes there and reload/reopen the workspace to use that build.
+
+The preview starts signed out at `http://127.0.0.1:8788`. Create your account
+with an email and password; return with the same credentials to sign in.
+Nothing is deployed by these commands. Any-device browser access needs a reachable
+HTTPS gateway; Iroh links that gateway to your laptop. See [app setup and gateway
+configuration](app/README.md) for the complete flow, updates and current limits.
+
+## Terminal-only dashboard setup
 
 On the computer that already has Hermes Agent installed and configured:
 
 ```sh
-git clone --branch hermes-agent-iroh-backend https://github.com/itsflownium/hermes-agent-universal-connector.git
+git clone --branch hermes-agent-local-app https://github.com/itsflownium/hermes-agent-universal-connector.git
 cd hermes-agent-universal-connector
 ./setup
 ```
 
-Choose **Share Hermes on this computer**, enter a username and a strong password,
+Choose **Share Hermes on this computer**, enter an email address and a strong password,
 and keep the printed endpoint ticket. Setup downloads the checksum-verified Iroh
 transport into this checkout and starts a dedicated Hermes connection. It needs
 Git and Python 3.10+; it does not install global packages or change your shell.
-The branch argument selects this implementation while the backend PR is unmerged.
+The branch argument selects this implementation while the website PR is unmerged.
 
 On the other computer, clone the same repository and run:
 
@@ -28,7 +49,7 @@ On the other computer, clone the same repository and run:
 ```
 
 Paste the endpoint ticket, then sign in at the printed local URL with the host's
-username and password. This client computer does not need Hermes installed.
+email and password. This client computer does not need Hermes installed.
 Leave its command running to keep the connection open.
 
 For an already deployed provider-account service, use
@@ -38,25 +59,25 @@ sign-in requires the operator's configured service; private Iroh sharing works n
 
 Use `./setup --check` to inspect prerequisites without changes, or
 `./setup --prepare-only` to prepare the transport before an interactive setup.
-`./flownium off`, `./flownium on`, and `./flownium status` manage the saved connection.
+`./nectit off`, `./nectit on`, and `./nectit status` manage the saved connection.
 Run `./setup --help` for an existing transport path, Hermes profile, workspace,
 ports, state directory, or noninteractive password input.
 
 ## How the connection works
 
 Hermes Agent continues running on your own computer, with its existing models,
-tools, files and configuration. Flownium manages a dedicated dashboard process
+tools, files and configuration. Nectit manages a dedicated dashboard process
 and an encrypted Iroh connection. Your computer must stay awake and online.
 
 There are two ways to reach it:
 
-- **Direct access:** run `flownium share` on the Hermes computer, then
-  `flownium access <ticket>` on the connecting computer. The access command
+- **Direct access:** run `nectit share` on the Hermes computer, then
+  `nectit access <ticket>` on the connecting computer. The access command
   opens a local browser URL that travels over Iroh to the real Hermes dashboard.
-  Hermes checks the sharing username and password. This works without a domain
+  Hermes checks the sharing email and password. This works without a domain
   or a hosted account service; the connecting device needs the access client.
 - **Website access:** deploy the account service once, then pair the Hermes
-  computer using `flownium login`. GitHub sign-in establishes account ownership.
+  computer using `nectit login`. GitHub sign-in establishes account ownership.
   The computer advertises its Iroh endpoint to the service, whose gateway forwards
   browser requests to Hermes after checking the owner. Native Hermes signs in
   through the service's OIDC provider. A hosting provider's HTTPS address and a
@@ -64,12 +85,12 @@ There are two ways to reach it:
 
 ```mermaid
 flowchart LR
-  B[Browser on another device] -->|HTTPS and account sign-in| G[Flownium account service and gateway]
+  B[Browser on another device] -->|HTTPS and account sign-in| G[Nectit account service and gateway]
   G -->|Encrypted Iroh connection| C[Connector on your computer]
-  C -->|Loopback HTTP and WebSocket| H[Real Hermes Agent dashboard and TUI]
+  C -->|Loopback HTTP and WebSocket| H[Real Hermes Agent backend]
 ```
 
-`flownium on` starts the saved connection; `flownium off` closes the transport and
+`nectit on` starts the saved connection; `nectit off` closes the transport and
 its managed Hermes dashboard. If authentication disappears, a managed child exits,
 or the platform revokes the paired device, the controller disables remote access.
 No agent runs on the account server, and model API keys stay with Hermes.
@@ -90,10 +111,10 @@ python3 tools/install_iroh.py --directory work/bin
 On the laptop with Hermes:
 
 ```sh
-./flownium share --username arhaan --dumbpipe-bin ./work/bin/dumbpipe
+./nectit share --email you@example.com --dumbpipe-bin ./work/bin/dumbpipe
 ```
 
-Enter a sharing password at the hidden prompt. Flownium starts a dedicated real
+Enter a sharing password at the hidden prompt. Nectit starts a dedicated real
 Hermes dashboard, verifies its password gate, and then enables Iroh. It prints
 an endpoint ticket, not a secret key. The password is stored as a salted scrypt
 hash; secrets are never command-line arguments.
@@ -101,7 +122,7 @@ hash; secrets are never command-line arguments.
 On another computer with this connector and `dumbpipe` installed:
 
 ```sh
-./flownium access <endpoint-ticket> --dumbpipe-bin ./work/bin/dumbpipe
+./nectit access <endpoint-ticket> --dumbpipe-bin ./work/bin/dumbpipe
 ```
 
 Open the printed loopback browser URL and sign in with the host's credentials.
@@ -112,13 +133,13 @@ Leave the access command running; Ctrl+C disconnects that client.
 On the host:
 
 ```sh
-./flownium status
-./flownium off
-./flownium on
-./flownium doctor
+./nectit status
+./nectit off
+./nectit on
+./nectit doctor
 ```
 
-`off` disables the processes Flownium started. It does not power off the laptop
+`off` disables the processes Nectit started. It does not power off the laptop
 or terminate independently running Hermes sessions. `on` reuses the saved sharing
 configuration. The laptop must remain awake and connected. A native Hermes chat
 tab controls its own PTY lifetime; tasks are not promised to survive closing it.
@@ -144,12 +165,12 @@ return explicit errors. Use Node 22+ and run one service process per data direct
 With a deployed account-service origin and a GitHub OAuth app configured:
 
 ```sh
-./flownium login --server https://your-provider-supplied-host --transport iroh
-./flownium on
+./nectit login --server https://your-provider-supplied-host --transport iroh
+./nectit on
 ```
 
 The operator sets `SERVICE_URL` in `flownium_distribution.py` before distributing
-the package, so ordinary users can simply run `flownium login`. Users do not
+the package, so ordinary users can simply run `nectit login`. Users do not
 configure DNS or supply platform credentials.
 
 The service provides device-code pairing, account ownership, OIDC authorization
@@ -176,7 +197,7 @@ See [the backend protocol](docs/backend.md) and
 
 ```sh
 python3 -m unittest discover -s tests -p test_cli.py -v
-node --test service/core.test.mjs service/iroh-gateway.test.mjs
+node --test service/core.test.mjs service/iroh-gateway.test.mjs app/server.test.mjs
 ```
 
 Opt-in checks against an installed real Hermes, with no model inference request:
@@ -197,7 +218,8 @@ connectivity and live Cloudflare/GitHub provisioning are not yet verified.
 
 The account service currently uses a single-process JSON store and a persisted
 RSA signing key. Multi-instance storage and signing-key rotation remain deployment
-work before broad registration. A custom web interface remains a separate task.
+work before broad registration. The local app is the first interface; public
+website deployment remains separate from this local build.
 
 References: [Hermes dashboard](https://hermes-agent.nousresearch.com/docs/user-guide/features/web-dashboard),
 [official Iroh dumbpipe](https://github.com/n0-computer/dumbpipe),

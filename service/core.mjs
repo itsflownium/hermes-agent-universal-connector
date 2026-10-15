@@ -118,7 +118,7 @@ export function githubProvider({ clientId, clientSecret, origin }, fetcher = fet
         body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code, code_verifier: verifier, redirect_uri: `${origin}/auth/callback` }) });
       const grant = await response.json();
       if (!response.ok || !grant.access_token) throw new HTTPError(401, 'GitHub sign-in failed.');
-      const options = { redirect: 'error', signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${grant.access_token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Flownium' } };
+      const options = { redirect: 'error', signal: AbortSignal.timeout(15000), headers: { Authorization: `Bearer ${grant.access_token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'Nectit' } };
       const [profileResponse, emailsResponse] = await Promise.all([fetcher('https://api.github.com/user', options), fetcher('https://api.github.com/user/emails', options)]);
       if (!profileResponse.ok || !emailsResponse.ok) throw new HTTPError(401, 'GitHub could not verify this account.');
       const profile = await profileResponse.json();
@@ -131,7 +131,7 @@ export function githubProvider({ clientId, clientSecret, origin }, fetcher = fet
 }
 
 function page(title, content) {
-  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Flownium</title><main><header>flownium<span style="color:#668e73">.</span></header>${content}</main></html>`,
+  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · Nectit</title><main><header>nectit<span style="color:#668e73">.</span></header>${content}</main></html>`,
     { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
       'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'", 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' } });
 }
@@ -154,7 +154,7 @@ export function createApp({ origin, workspaceDomain, store, signer, github, clou
   const bearer = request => {
     const token = request.headers.get('Authorization')?.match(/^Bearer (\S+)$/)?.[1];
     const value = token && store.data.sessions[hash(token)];
-    if (value?.kind !== 'cli' || value.expires <= seconds()) throw new HTTPError(401, 'Sign in with the Flownium CLI.');
+    if (value?.kind !== 'cli' || value.expires <= seconds()) throw new HTTPError(401, 'Sign in with the Nectit CLI.');
     return value;
   };
   const csrf = (request, current, input) => {
@@ -240,7 +240,7 @@ export function createApp({ origin, workspaceDomain, store, signer, github, clou
     if (request.method === 'GET' && path === '/activate') {
       const auth = signedIn(request, path + url.search);
       if (auth instanceof Response) return auth;
-      return page('Connect your laptop', `<h1>Connect your laptop.</h1><p>Enter the pairing code shown in your Flownium CLI.</p><form class="card" method="post" action="/activate"><input type="hidden" name="csrf" value="${auth.csrf}"><label for="code">Pairing code</label><input id="code" name="code" required autocomplete="off" maxlength="12"><button>Continue</button></form>`);
+      return page('Connect your laptop', `<h1>Connect your laptop.</h1><p>Enter the pairing code shown in your Nectit CLI.</p><form class="card" method="post" action="/activate"><input type="hidden" name="csrf" value="${auth.csrf}"><label for="code">Pairing code</label><input id="code" name="code" required autocomplete="off" maxlength="12"><button>Continue</button></form>`);
     }
     if (request.method === 'POST' && path === '/activate') {
       if (!current) throw new HTTPError(401, 'Sign in first.');
@@ -250,7 +250,7 @@ export function createApp({ origin, workspaceDomain, store, signer, github, clou
       if (!grant) throw new HTTPError(400, 'That pairing code is invalid or expired.');
       // Show the machine name and require a second, explicit confirmation before
       // binding it. Merely following a link never pairs a device.
-      if (body.confirm !== 'yes') return page('Confirm laptop', `<h1>Pair this laptop?</h1><div class="card"><strong>${escape(grant.name)}</strong><p>Approve only the computer on which you just ran Flownium.</p><form method="post" action="/activate"><input type="hidden" name="csrf" value="${current.csrf}"><input type="hidden" name="code" value="${grant.userCode}"><input type="hidden" name="confirm" value="yes"><button>Pair laptop</button></form></div>`);
+      if (body.confirm !== 'yes') return page('Confirm laptop', `<h1>Pair this laptop?</h1><div class="card"><strong>${escape(grant.name)}</strong><p>Approve only the computer on which you just ran Nectit.</p><form method="post" action="/activate"><input type="hidden" name="csrf" value="${current.csrf}"><input type="hidden" name="code" value="${grant.userCode}"><input type="hidden" name="confirm" value="yes"><button>Pair laptop</button></form></div>`);
       grant.user = current.user; store.save();
       return page('Laptop paired', '<h1>Laptop paired.</h1><p>Return to your terminal to finish connecting Hermes.</p><a class="button" href="/">Your workspace</a>');
     }

@@ -1,4 +1,4 @@
-"""Flownium's macOS/Linux/WSL2 host controller. No runtime Python dependencies.
+"""Nectit's macOS/Linux/WSL2 host controller. No runtime Python dependencies.
 
 The host connects to the installed Hermes dashboard, never an imitation of it.
 Iroh sharing uses native Hermes password authentication; account mode uses OIDC.
@@ -150,10 +150,10 @@ def server_url(value):
     parsed = urllib.parse.urlsplit(value)
     if (parsed.username or parsed.password or parsed.query or parsed.fragment
             or parsed.path not in {"", "/"} or not parsed.hostname):
-        raise FlowniumError("Use the Flownium service's HTTPS origin, without a path.")
+        raise FlowniumError("Use the Nectit service's HTTPS origin, without a path.")
     development = parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}
     if parsed.scheme != "https" and not development:
-        raise FlowniumError("The Flownium account service must use HTTPS.")
+        raise FlowniumError("The Nectit account service must use HTTPS.")
     return value.rstrip("/")
 
 
@@ -167,7 +167,7 @@ def executable(value, name):
 def load_config(state):
     config = read_json(state / "config.json")
     if not config:
-        raise FlowniumError("First run './setup', 'flownium share', or 'flownium login'.")
+        raise FlowniumError("First run './setup', 'nectit share', or 'nectit login'.")
     return config
 
 
@@ -202,7 +202,7 @@ def print_status(data, as_json=False):
     if as_json:
         print(json.dumps(data, indent=2))
         return
-    print(f"Flownium: {data.get('phase', 'off')}")
+    print(f"Nectit: {data.get('phase', 'off')}")
     if data.get("mode"):
         print(f"Mode: {data['mode']}")
     if data.get("url"):
@@ -213,7 +213,10 @@ def print_status(data, as_json=False):
         print("Login providers: " + ", ".join(data["auth_providers"]))
     if data.get("iroh_ticket"):
         print("Iroh ticket: " + data["iroh_ticket"])
-        print("Use 'flownium access <ticket>' on the connecting computer.")
+        if data.get("desktop_renderer"):
+            print("Open './nectit app' on the connecting computer, choose Another computer, and paste this ticket.")
+        else:
+            print("Use 'nectit access <ticket>' on the connecting computer.")
     if data.get("mode") == "remote" and data.get("phase") == "online":
         transport = "Iroh endpoint ready" if data.get("transport") == "iroh" else "Tunnel connected"
         print(transport + ". Public browser login has not been independently verified.")
@@ -249,7 +252,7 @@ def dashboard_status(config):
         ):
             raise AuthenticationError("Hermes needs a configured OAuth/OIDC login provider before remote access can start. The tunnel was not enabled.")
         if config.get("oidc_issuer") and set(providers) - {"self-hosted", "drain"}:
-            raise AuthenticationError("This Hermes profile has other dashboard login providers enabled. Use a profile with only Flownium's self-hosted OIDC provider so workspace ownership is enforced.")
+            raise AuthenticationError("This Hermes profile has other dashboard login providers enabled. Use a profile with only Nectit's self-hosted OIDC provider so workspace ownership is enforced.")
     return result
 
 
@@ -305,12 +308,58 @@ def stop_child(process):
         process.wait(timeout=5)
 
 
+def complete_renderer(directory):
+    try:
+        html = (directory / "index.html").read_text(encoding="utf-8-sig")
+        references = re.findall(r'(?:src|href)=["\']\./(assets/[^"\']+)["\']', html)
+        return bool(references) and all((directory / path).is_file() for path in references)
+    except OSError:
+        return False
+
+
+def point_renderer(state, renderer):
+    # A private stable path lets the native server read updated builds in place.
+    alias = state / "desktop-renderer"
+    if alias.exists() and not alias.is_symlink():
+        raise FlowniumError("The private desktop-renderer path is not a symlink.")
+    if alias.is_symlink() and alias.resolve() == renderer.resolve():
+        return alias
+    temporary = state / ("renderer-" + uuid.uuid4().hex)
+    temporary.symlink_to(renderer, target_is_directory=True)
+    os.replace(temporary, alias)
+    return alias
+
+
+def desktop_renderer(hermes_bin):
+    """Read the installed renderer in place; no vendored or frozen UI bundle."""
+    override = os.environ.get("HERMES_DESKTOP_DIST")
+    if override:
+        candidate = Path(override).expanduser().resolve()
+        if not complete_renderer(candidate):
+            raise FlowniumError("HERMES_DESKTOP_DIST must contain a built Hermes Desktop index.html.")
+        return candidate
+    roots = [Path(os.environ.get("HERMES_AGENT_ROOT", "~/.hermes/hermes-agent")).expanduser()]
+    executable = Path(shutil.which(hermes_bin) or hermes_bin).resolve()
+    roots += list(executable.parents)[:4]
+    for tree in roots:
+        desktop = tree / "apps/desktop"
+        candidates = [desktop / "dist"]
+        if (desktop / "release").is_dir():
+            candidates += list((desktop / "release").glob("*/Hermes.app/Contents/Resources/app.asar.unpacked/dist"))
+            candidates += list((desktop / "release").glob("*/resources/app.asar.unpacked/dist"))
+        built = [value for value in candidates if complete_renderer(value)]
+        if built:
+            return max(built, key=lambda value: (value / "index.html").stat().st_mtime_ns)
+    return None
+
+
 def supervise(state, run_id):
     config = load_config(state)
     private_dir(state)
     status = {"phase": "starting", "run_id": run_id, "mode": config["mode"],
               "url": config.get("public_url") or f"https://{config['hostname']}" if config["mode"] == "remote"
-              else f"http://127.0.0.1:{config['port']}", "public_url_verified": False}
+              else f"http://127.0.0.1:{config['port']}", "public_url_verified": False,
+              "desktop_renderer": bool(config.get("desktop_renderer"))}
     if config["mode"] == "peer":
         status["url"] = None
     use_iroh = config["mode"] == "peer" or config.get("transport") == "iroh"
@@ -345,7 +394,7 @@ def supervise(state, run_id):
         if config["mode"] == "peer":
             auth = read_json(state / "basic-auth.json")
             if not auth:
-                raise FlowniumError("Configure Iroh sharing with 'flownium share --username NAME' first.")
+                raise FlowniumError("Configure Iroh sharing with 'nectit share --username NAME' first.")
             env["HERMES_DASHBOARD_BASIC_AUTH_USERNAME"] = auth["username"]
             env["HERMES_DASHBOARD_BASIC_AUTH_PASSWORD_HASH"] = auth["password_hash"]
             env["HERMES_DASHBOARD_BASIC_AUTH_SECRET"] = auth["secret"]
@@ -354,6 +403,13 @@ def supervise(state, run_id):
             env["HERMES_DASHBOARD_OIDC_ISSUER"] = config["oidc_issuer"]
             env["HERMES_DASHBOARD_OIDC_CLIENT_ID"] = config["oidc_client_id"]
             env.pop("HERMES_DASHBOARD_OIDC_CLIENT_SECRET", None)
+        renderer = desktop_renderer(config["hermes_bin"]) if config.get("desktop_renderer") else None
+        if config.get("desktop_renderer") and not renderer:
+            raise FlowniumError("Build Hermes Desktop first with hermes gui --build-only, or set HERMES_DESKTOP_DIST.")
+        if renderer:
+            # The alias marks this as a deliberate browser-adapted renderer,
+            # rather than an accidentally inherited Electron web-dist path.
+            env["HERMES_WEB_DIST"] = str(point_renderer(state, renderer))
         command = [config["hermes_bin"]]
         if config.get("profile"):
             command += ["-p", config["profile"]]
@@ -403,9 +459,20 @@ def supervise(state, run_id):
         save_json(state / "status.json", status)
         last_check = 0.0
         last_heartbeat = 0.0
+        last_renderer_check = time.monotonic()
         session = read_json(state / "session.json", {})
         deadline = time.monotonic() + config["startup_timeout"]
         while not stopped:
+            if config.get("desktop_renderer") and time.monotonic() - last_renderer_check > 15:
+                # An updater may replace the source or packaged build directory.
+                # Keep the last complete renderer through partial build swaps.
+                try:
+                    updated_renderer = desktop_renderer(config["hermes_bin"])
+                    if updated_renderer:
+                        point_renderer(state, updated_renderer)
+                except (FlowniumError, OSError):
+                    pass
+                last_renderer_check = time.monotonic()
             if hermes.poll() is not None:
                 raise FlowniumError("Hermes stopped; remote access has been disabled.")
             if tunnel and tunnel.poll() is not None:
@@ -486,7 +553,7 @@ def start(state):
     elif config["mode"] == "remote":
         config["cloudflared_bin"] = executable(config["cloudflared_bin"], "cloudflared")
         if not (state / "tunnel-token").is_file():
-            raise FlowniumError("No tunnel credential is available. Run 'flownium login'.")
+            raise FlowniumError("No tunnel credential is available. Run 'nectit login'.")
     if not Path(config["workspace"]).is_dir():
         raise FlowniumError("The selected workspace directory does not exist.")
     save_json(state / "config.json", config)
@@ -517,7 +584,7 @@ def start(state):
 
 def stop(state):
     if not daemon_running(state):
-        print("Flownium: off")
+        print("Nectit: off")
         return
     if not control(state, "stop"):
         raise FlowniumError("The running controller is not responding; no unrelated process was signalled.")
@@ -525,8 +592,8 @@ def stop(state):
     while daemon_running(state) and time.monotonic() < deadline:
         time.sleep(0.1)
     if daemon_running(state):
-        raise FlowniumError("Shutdown is still in progress. Check 'flownium status'.")
-    print("Flownium: off")
+        raise FlowniumError("Shutdown is still in progress. Check 'nectit status'.")
+    print("Nectit: off")
 
 
 def base_config(args, mode):
@@ -534,17 +601,18 @@ def base_config(args, mode):
             "hermes_bin": args.hermes_bin, "cloudflared_bin": args.cloudflared_bin,
             "dumbpipe_bin": args.dumbpipe_bin, "transport": getattr(args, "transport", "iroh" if mode == "peer" else "local"),
             "workspace": str(Path(args.workspace).expanduser().resolve()),
-            "profile": args.profile, "startup_timeout": args.timeout}
+            "profile": args.profile, "startup_timeout": args.timeout,
+            "desktop_renderer": getattr(args, "desktop", False)}
 
 
 def share(state, args):
     if daemon_running(state):
-        raise FlowniumError("Turn Flownium off before changing sharing configuration.")
+        raise FlowniumError("Turn Nectit off before changing sharing configuration.")
     previous = read_json(state / "config.json", {})
     if previous.get("mode") == "remote":
         raise FlowniumError("Use a separate --state-dir for private Iroh sharing to preserve your paired workspace.")
-    if not re.fullmatch(r"[A-Za-z0-9_.@-]{1,80}", args.username):
-        raise FlowniumError("Use a simple username of at most 80 characters.")
+    if not re.fullmatch(r"[A-Za-z0-9_.+@-]{1,254}", args.username):
+        raise FlowniumError("Use a sharing email or simple account name of at most 254 characters.")
     password = sys.stdin.readline().rstrip("\r\n") if args.password_stdin else getpass.getpass("Sharing password (at least 12 characters): ")
     if len(password) < 12:
         raise FlowniumError("Use a sharing password of at least 12 characters.")
@@ -561,7 +629,7 @@ def share(state, args):
 
 def access(state, args):
     if not re.fullmatch(r"(?:node|endpoint)[a-z2-7]{40,4096}", args.ticket):
-        raise FlowniumError("Use a valid Iroh endpoint ticket from 'flownium share'.")
+        raise FlowniumError("Use a valid Iroh endpoint ticket from 'nectit share'.")
     if not 1024 <= args.port <= 65535:
         raise FlowniumError("Use a local port between 1024 and 65535.")
     free_port(args.port)
@@ -600,7 +668,7 @@ def login(state, args):
     from flownium_distribution import SERVICE_URL
     value = args.server or os.environ.get("FLOWNIUM_SERVER") or previous.get("server") or SERVICE_URL
     if not value:
-        raise FlowniumError("Flownium's public account service is not deployed/configured yet. The operator must supply its URL with --server or FLOWNIUM_SERVER; users do not configure a domain or tunnel. Use './setup --mode host' for private Iroh sharing now.")
+        raise FlowniumError("Nectit's public account service is not deployed/configured yet. The operator must supply its URL with --server or FLOWNIUM_SERVER; users do not configure a domain or tunnel. Use './setup --mode host' for private Iroh sharing now.")
     server = server_url(value)
     installation = read_json(state / "installation.json")
     if not installation:
@@ -612,7 +680,7 @@ def login(state, args):
         raise FlowniumError("The account service returned an incomplete device sign-in response.")
     verification = urllib.parse.urlsplit(grant["verification_uri"])
     if (verification.scheme, verification.netloc) != (urllib.parse.urlsplit(server).scheme, urllib.parse.urlsplit(server).netloc):
-        raise FlowniumError("The sign-in page must belong to the configured Flownium account service.")
+        raise FlowniumError("The sign-in page must belong to the configured Nectit account service.")
     print(f"Sign in: {grant['verification_uri']}")
     print(f"Pairing code: {grant['user_code']}")
     if not args.no_browser:
@@ -648,7 +716,7 @@ def login(state, args):
             raise FlowniumError("The account service did not provision a device and tunnel credential.")
         if enrollment.get("oidc_issuer"):
             if server_url(enrollment["oidc_issuer"]) != server or enrollment.get("oidc_client_id") != config["device_id"]:
-                raise FlowniumError("The workspace's login provider must be its Flownium account service.")
+                raise FlowniumError("The workspace's login provider must be its Nectit account service.")
             config.update(oidc_issuer=server, oidc_client_id=config["device_id"])
         private_dir(state)
         if config["transport"] == "cloudflare":
@@ -658,9 +726,9 @@ def login(state, args):
         save_json(state / "session.json", {"server": server, "access_token": token})
         save_json(state / "config.json", config)
         print("Laptop paired. Workspace: " + config.get("public_url", f"https://{config['hostname']}"))
-        print("Run 'flownium on' to start remote access.")
+        print("Run 'nectit on' to start remote access.")
         return
-    raise FlowniumError("The pairing code expired. Run 'flownium login' again.")
+    raise FlowniumError("The pairing code expired. Run 'nectit login' again.")
 
 
 def logout(state):
@@ -669,13 +737,13 @@ def logout(state):
     session = read_json(state / "session.json", {})
     if config.get("device_id"):
         if not session.get("access_token"):
-            raise FlowniumError("The account credential is unavailable. Revoke this laptop from the Flownium service before deleting its local credentials.")
+            raise FlowniumError("The account credential is unavailable. Revoke this laptop from the Nectit service before deleting its local credentials.")
         http_json(config["server"] + "/v1/devices/" + urllib.parse.quote(config["device_id"], safe=""),
                   token=session["access_token"], method="DELETE", timeout=60)
     for filename in ("session.json", "tunnel-token", "config.json", "basic-auth.json", "iroh-key.json"):
         with contextlib.suppress(FileNotFoundError):
             (state / filename).unlink()
-    print("Laptop disconnected from Flownium.")
+    print("Laptop disconnected from Nectit.")
 
 
 def doctor(state, as_json):
@@ -697,13 +765,58 @@ def doctor(state, as_json):
         print_status(checks["status"])
 
 
+def app(state, args):
+    server = HERE.parent / "app" / "server.mjs"
+    if not server.is_file():
+        raise FlowniumError("The desktop website runs from the source checkout. Clone the repository and run './nectit app' there.")
+    node = shutil.which("node")
+    if not node:
+        raise FlowniumError("The local website requires Node.js 22+. Install Node, then rerun './nectit app'.")
+    version = subprocess.run([node, "--version"], capture_output=True, text=True, check=True).stdout.strip()
+    if int(version.lstrip("v").split(".")[0]) < 22:
+        raise FlowniumError("The local website requires Node.js 22+.")
+    if not 1024 <= args.port <= 65535:
+        raise FlowniumError("Use an app port between 1024 and 65535.")
+    free_port(args.port)
+    env = os.environ.copy()
+    env.update(FLOWNIUM_APP_PORT=str(args.port), FLOWNIUM_PYTHON=sys.executable)
+    env.setdefault("FLOWNIUM_APP_HOST_STATE", str(state))
+    env_file = HERE.parent / "work/local-app.env"
+    node_command = [node, *(["--env-file=" + str(env_file)] if env_file.is_file() else []), str(server)]
+    process = subprocess.Popen(node_command, cwd=HERE.parent, env=env, start_new_session=True)
+    url = f"http://127.0.0.1:{args.port}"
+    try:
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise FlowniumError("The local website could not start.")
+            try:
+                http_json(url + "/local/bootstrap")
+                break
+            except FlowniumError:
+                time.sleep(0.15)
+        else:
+            raise FlowniumError("The local website did not become ready.")
+        print(f"Open {url}\nPress Ctrl+C to stop the local app.", flush=True)
+        if not args.no_browser:
+            webbrowser.open(url)
+        return process.wait()
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=25)
+            except subprocess.TimeoutExpired:
+                stop_child(process)
+
+
 def parser():
-    result = argparse.ArgumentParser(description="Connect real Hermes on your laptop to Flownium.")
+    result = argparse.ArgumentParser(description="Connect real Hermes on your laptop to Nectit.")
     result.add_argument("--version", action="version", version=VERSION)
     result.add_argument("--state-dir", default=os.environ.get("FLOWNIUM_STATE_DIR", str(Path.home() / ".config" / "flownium")))
     sub = result.add_subparsers(dest="command", required=True)
-    for name, helptext in [("login", "Sign in and let Flownium assign your workspace"),
-                           ("share", "Share real Hermes over Iroh with a username and password"),
+    for name, helptext in [("login", "Sign in and let Nectit assign your workspace"),
+                           ("share", "Share real Hermes over Iroh with an email and password"),
                            ("local", "Connect to real local Hermes without publishing a tunnel")]:
         command = sub.add_parser(name, help=helptext)
         command.add_argument("--hermes-bin", default="hermes")
@@ -716,18 +829,24 @@ def parser():
         command.add_argument("--timeout", type=int, default=90)
         if name == "login":
             command.add_argument("--transport", choices=["iroh", "cloudflare"], default="iroh")
-            command.add_argument("--server", help="Operator-supplied Flownium service origin")
+            command.add_argument("--server", help="Operator-supplied Nectit service origin")
             command.add_argument("--no-browser", action="store_true")
         if name == "share":
-            command.add_argument("--username", required=True)
+            command.add_argument("--email", "--username", dest="username", required=True)
+            command.add_argument("--desktop", action="store_true", help="Serve the installed Hermes Desktop renderer through the Nectit browser adapter")
             command.add_argument("--password-stdin", action="store_true", help="Read the password from stdin instead of an interactive prompt")
     command = sub.add_parser("access", help="Open a shared Iroh endpoint through a loopback browser URL")
     command.add_argument("ticket")
     command.add_argument("--dumbpipe-bin", default="dumbpipe")
     command.add_argument("--port", type=int, default=19121)
     command.add_argument("--no-browser", action="store_true")
-    sub.add_parser("on", help="Start Hermes and the configured Iroh or Cloudflare transport")
-    sub.add_parser("off", help="Stop only the processes managed by Flownium")
+    command = sub.add_parser("app", help="Open the local desktop-style Hermes Agent website")
+    command.add_argument("--port", type=int, default=8788)
+    command.add_argument("--no-browser", action="store_true")
+    command = sub.add_parser("on", help="Start Hermes and the configured Iroh or Cloudflare transport")
+    command.add_argument("--desktop", action="store_true", help="Use the installed desktop renderer for the Nectit web workspace")
+    command = sub.add_parser("off", help="Stop only the processes managed by Nectit")
+    command.add_argument("--if-run-id", help=argparse.SUPPRESS)
     sub.add_parser("logout", help="Stop remote access and revoke this laptop's connection")
     sub.add_parser("open", help="Open the configured Hermes workspace")
     for name in ("status", "doctor"):
@@ -740,7 +859,7 @@ def parser():
 
 def main(argv=None):
     if os.name != "posix":
-        print("Run the Flownium host on macOS, Linux, or Windows through WSL2.", file=sys.stderr)
+        print("Run the Nectit host on macOS, Linux, or Windows through WSL2.", file=sys.stderr)
         return 1
     args = parser().parse_args(argv)
     state = Path(args.state_dir).expanduser().resolve()
@@ -761,8 +880,20 @@ def main(argv=None):
         if args.command == "access":
             access(state, args)
             return 0
+        if args.command == "app":
+            return app(state, args)
         if args.command == "open":
             config = load_config(state)
+            if config.get("desktop_renderer"):
+                try:
+                    running = http_json("http://127.0.0.1:8788/local/bootstrap")
+                except FlowniumError:
+                    running = {}
+                if running.get("product") == "nectit":
+                    webbrowser.open("http://127.0.0.1:8788")
+                    print("http://127.0.0.1:8788")
+                    return 0
+                return app(state, argparse.Namespace(port=8788, no_browser=False))
             url = (config.get("public_url") or f"https://{config['hostname']}") if config["mode"] == "remote" else f"http://127.0.0.1:{config['port']}"
             webbrowser.open(url)
             print(url)
@@ -774,24 +905,36 @@ def main(argv=None):
                 return share(state, args)
             elif args.command == "local":
                 if daemon_running(state):
-                    raise FlowniumError("Run 'flownium off' before changing host configuration.")
+                    raise FlowniumError("Run 'nectit off' before changing host configuration.")
                 previous = read_json(state / "config.json", {})
                 if previous.get("mode") == "remote":
                     raise FlowniumError("Use a separate --state-dir for a local test so your paired workspace is preserved.")
                 save_json(state / "config.json", base_config(args, "local"))
                 return start(state)
             elif args.command == "on":
+                if args.desktop:
+                    config = load_config(state)
+                    if config["mode"] != "peer":
+                        raise FlowniumError("Use a private Iroh host for the Nectit desktop workspace.")
+                    if not config.get("desktop_renderer"):
+                        if not desktop_renderer(config["hermes_bin"]):
+                            raise FlowniumError("Build Hermes Desktop first with hermes gui --build-only, or set HERMES_DESKTOP_DIST.")
+                        stop(state)
+                        config["desktop_renderer"] = True
+                        save_json(state / "config.json", config)
                 return start(state)
             elif args.command == "off":
+                if args.if_run_id and snapshot(state).get("run_id") != args.if_run_id:
+                    return 0
                 stop(state)
             elif args.command == "logout":
                 logout(state)
         return 0
     except (FlowniumError, OSError) as exc:
-        print(f"Flownium: {exc}", file=sys.stderr)
+        print(f"Nectit: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
-        print("\nFlownium: interrupted.", file=sys.stderr)
+        print("\nNectit: interrupted.", file=sys.stderr)
         return 130
 
 

@@ -4,6 +4,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 import signal
 import socket
 import socketserver
@@ -62,7 +63,7 @@ import http.server, json, os, signal, socketserver, sys
 from pathlib import Path
 root = Path(__file__).parent
 kind = Path(__file__).name
-(root / (kind + '.process.json')).write_text(json.dumps({'pid': os.getpid(), 'argv': sys.argv, 'public_url': os.environ.get('HERMES_DASHBOARD_PUBLIC_URL')}))
+(root / (kind + '.process.json')).write_text(json.dumps({'pid': os.getpid(), 'argv': sys.argv, 'public_url': os.environ.get('HERMES_DASHBOARD_PUBLIC_URL'), 'web_dist': os.environ.get('HERMES_WEB_DIST')}))
 if kind == 'dumbpipe':
     import time
     assert os.environ.get('IROH_SECRET')
@@ -157,7 +158,10 @@ Server(('127.0.0.1', port), Handler).serve_forever()
         status = json.loads(self.run_cli("status", "--json").stdout)
         self.assertEqual(status["phase"], "online")
         self.assertEqual(status["mode"], "local")
-        self.run_cli("off")
+        # A closing browser launcher may only stop its own controller run.
+        self.run_cli("off", "--if-run-id", "stale-controller-run")
+        self.assertTrue(cli.daemon_running(self.state))
+        self.run_cli("off", "--if-run-id", status["run_id"])
         self.run_cli("off")
         with self.assertRaises(ProcessLookupError):
             os.kill(first, 0)
@@ -245,6 +249,31 @@ Server(('127.0.0.1', port), Handler).serve_forever()
         self.assertTrue(status["iroh_ticket"].startswith("endpoint"))
         self.assertIsNone(status["url"])
         self.run_cli("off")
+
+    def test_desktop_upgrade_preserves_sharing_credentials_and_follows_complete_builds(self):
+        desktop = self.root / "desktop"
+        (desktop / "assets").mkdir(parents=True)
+        (desktop / "index.html").write_text('<script type="module" src="./assets/index-test.js"></script>')
+        # Do not select a partially installed build.
+        self.assertFalse(cli.complete_renderer(desktop))
+        (desktop / "assets/index-test.js").write_text("// explicit renderer fixture")
+        self.assertTrue(cli.complete_renderer(desktop))
+        self.run_cli("share", "--email", "owner+device@example.com", "--password-stdin", "--dumbpipe-bin", str(self.dumbpipe),
+                     "--hermes-bin", str(self.hermes), "--port", str(self.port), "--metrics-port", str(self.metrics),
+                     "--workspace", str(self.root), "--timeout", str(FIXTURE_STARTUP), input="correct-test-password\n")
+        original = (self.state / "basic-auth.json").read_bytes()
+        with patch.dict(os.environ, {"HERMES_DESKTOP_DIST": str(desktop)}):
+            self.run_cli("on", "--desktop")
+        self.assertEqual(original, (self.state / "basic-auth.json").read_bytes())
+        self.assertTrue(json.loads((self.state / "config.json").read_text())["desktop_renderer"])
+        alias = self.state / "desktop-renderer"
+        self.assertEqual(alias.resolve(), desktop.resolve())
+        self.assertEqual(Path(json.loads((self.root / "hermes.process.json").read_text())["web_dist"]).resolve(), alias.resolve())
+        newer = self.root / "newer-desktop"
+        newer.mkdir()
+        (newer / "index.html").write_text("updated renderer fixture")
+        cli.point_renderer(self.state, newer)
+        self.assertEqual(alias.resolve(), newer.resolve())
 
     def test_iroh_sharing_refuses_an_inactive_login_gate(self):
         (self.root / "no-auth").touch()

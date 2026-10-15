@@ -1,6 +1,7 @@
 # Backend contract
 
-No application frontend is included. OAuth/pairing consent is part of the backend
+This contract describes the connection/account backend. The local desktop-style
+website is documented in `app/README.md`. OAuth/pairing consent is part of the
 authentication protocol. Live integration credentials are optional during development.
 
 ## Components
@@ -101,7 +102,7 @@ set `BIND_HOST=0.0.0.0` only when the deployment network requires it. Persist
 `FLOWNIUM_SERVICE_DATA`. `/health` reports which integrations are configured.
 On each Hermes computer, run `./setup --mode account --server <HTTPS-origin>`,
 complete the browser pairing, and keep the computer online. Setup starts the
-transport after approval. Subsequent `./flownium off` and `./flownium on` reuse
+transport after approval. Subsequent `./nectit off` and `./nectit on` reuse
 that computer's saved configuration.
 
 Supply GitHub OAuth settings only when enabling provider-account pairing. Its
