@@ -28,7 +28,9 @@ let profile,
   busy = false,
   error = "",
   notice = "",
-  toastTimer;
+  toastTimer,
+  pairingCode = null,
+  pairedDevices = [];
 const clone =
   "git clone https://github.com/itsflownium/hermes-agent-universal-connector.git";
 const setup = "cd hermes-agent-universal-connector && ./setup --desktop";
@@ -72,10 +74,14 @@ function addressPage() {
 function command(value, action) {
   return `<div class="command"><code>${esc(value)}</code><button type="button" data-action="${action}" aria-label="Copy ${action === "copy-clone" ? "clone" : "setup"} command">${icon("copy", 14)} Copy</button></div>`;
 }
+function sharingPanel() {
+  if (!profile.features?.pairing || status?.connection?.kind !== "host") return "";
+  return `<div class="sharing-panel"><div class="sharing-title"><strong>Connect another device</strong><button type="button" class="text-button" data-action="pair-code">${pairingCode ? "New code" : "Create pairing code"}</button></div><p>Start Nectit on the other computer, then paste this code in <strong>Pair a computer</strong>. It works once and expires after five minutes.</p>${pairingCode ? `<div class="command"><code>${esc(pairingCode.code)}</code><button type="button" data-action="copy-pair">${icon("copy", 14)} Copy</button></div><p class="field-hint">Host fingerprint: <code>${esc(pairingCode.fingerprint)}</code> · Expires ${esc(new Date(pairingCode.expires).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}))}</p>` : ""}${pairedDevices.length ? `<div class="paired-list">${pairedDevices.map(d => `<div><span>${esc(d.name)}<small>${d.revoked ? "Revoked" : "Paired"}</small></span>${d.revoked ? "" : `<button type="button" class="text-button" data-action="revoke:${esc(d.id)}">Revoke</button>`}</div>`).join("")}</div>` : ""}<p class="field-hint">Terminal: <code>./nectit pair code</code> · <code>./nectit pair devices</code></p></div>`;
+}
 function computerPage() {
   if (status?.connected)
-    return `<div class="page-heading"><span class="eyebrow">Everything in its place</span><h1>Hermes is ready.</h1><p>Your computer is connected. Open the same desktop workspace, right here in your browser.</p></div><div class="ready-computer">${icon("computer", 48)}<div><strong>Hermes Agent</strong><span>Version ${esc(status.connection?.version || "")}</span></div><span class="status-dot"></span></div><div class="explanation"><span class="explanation-icon">${icon("check", 20)}</span><div><strong>Your desktop, kept current.</strong><p>Nectit loads the Hermes interface from your connected computer. Update Hermes there, then reload your web workspace to use the new build.</p></div></div><button type="button" data-action="disconnect" class="text-button">Disconnect this computer</button>`;
-  return `<div class="page-heading"><span class="eyebrow">Your computer does the work</span><h1>Bring Hermes along.</h1><p>Connect the computer that runs Hermes. Keep it awake and online to reach your agent from other devices.</p></div><div class="connection-choice"><button type="button" data-action="host" class="${kind === "host" ? "selected" : ""}" aria-pressed="${kind === "host"}">${icon("computer", 16)} This computer</button><button type="button" data-action="peer" class="${kind === "peer" ? "selected" : ""}" aria-pressed="${kind === "peer"}">${icon("globe", 16)} Another computer</button></div><div class="connection-fields">${kind === "peer" ? input("ticket", "Iroh endpoint ticket", "endpoint…", 'spellcheck="false" class="mono"') : ""}${input("email", "Sharing email", "you@example.com", `type="email" value="${esc(kind === "host" ? profile.email : "")}" autocomplete="email" maxlength="254"`)}${input("password", kind === "host" ? "Sharing password" : "Password from your computer", "At least 12 characters", 'type="password" autocomplete="current-password" minlength="12" maxlength="1024"')}<p class="field-hint">${kind === "host" ? "Use your existing sharing credentials, or choose them here for a new connection." : "Use the email and password you chose in terminal setup on the host."}</p></div><details class="terminal-setup" ${kind === "peer" ? "open" : ""}><summary>Set up your computer from the terminal</summary><p>Run these on the computer with Hermes installed. Setup prints an endpoint ticket to connect another device.</p>${command(clone, "copy-clone")}${command(setup, "copy-setup")}<p class="field-hint">Then run <code>./nectit app</code> to open this website locally. Start or stop the connection with <code>./nectit on</code> and <code>./nectit off</code>.</p></details><p class="connection-status"><span class="status-dot ${busy ? "pulse" : "off"}"></span>${busy ? "Starting Hermes and checking the connection…" : "Your workspace opens after the connection is verified."}</p>`;
+    return `<div class="page-heading"><span class="eyebrow">Everything in its place</span><h1>Hermes is ready.</h1><p>Your computer is connected. Open the same desktop workspace, right here in your browser.</p></div><div class="ready-computer">${icon("computer", 48)}<div><strong>Hermes Agent</strong><span>Version ${esc(status.connection?.version || "")}</span></div><span class="status-dot"></span></div><div class="explanation"><span class="explanation-icon">${icon("check", 20)}</span><div><strong>Your desktop, kept current.</strong><p>Nectit loads the Hermes interface from your connected computer. Update Hermes there, then reload your web workspace to use the new build.</p></div></div>${status.connection?.fingerprint ? `<p class="field-hint">Connected host: <code>${esc(status.connection.fingerprint)}</code></p>` : ""}${sharingPanel()}<button type="button" data-action="disconnect" class="text-button">Disconnect this computer</button>`;
+  return `<div class="page-heading"><span class="eyebrow">Your computer does the work</span><h1>Bring Hermes along.</h1><p>Connect the computer that runs Hermes. Keep it awake and online to reach your agent from other devices.</p></div><div class="connection-choice"><button type="button" data-action="host" class="${kind === "host" ? "selected" : ""}" aria-pressed="${kind === "host"}">${icon("computer", 16)} This computer</button>${profile.features?.pairing ? `<button type="button" data-action="pair" class="${kind === "pair" ? "selected" : ""}" aria-pressed="${kind === "pair"}">${icon("globe", 16)} Pair a computer</button>` : ""}<button type="button" data-action="peer" class="${kind === "peer" ? "selected" : ""}" aria-pressed="${kind === "peer"}">Endpoint ticket</button></div><div class="connection-fields">${kind === "pair" ? `<label class="field">Pairing code<textarea name="code" rows="3" placeholder="nectit1:…" spellcheck="false" autocapitalize="none" required maxlength="12000"></textarea></label>${input("name", "This device’s name", "My laptop", 'maxlength="64"')}<p class="field-hint">On the Hermes computer, run <code>./nectit pair code</code>, or create a code in its Computer settings.</p>` : `${kind === "peer" ? input("ticket", "Iroh endpoint ticket", "endpoint…", 'spellcheck="false" class="mono"') : ""}${input("email", "Sharing email", "you@example.com", `type="email" value="${esc(kind === "host" ? profile.email : "")}" autocomplete="email" maxlength="254"`)}${input("password", kind === "host" ? "Sharing password" : "Password from your computer", "At least 12 characters", 'type="password" autocomplete="current-password" minlength="12" maxlength="1024"')}<p class="field-hint">${kind === "host" ? "Use your existing sharing credentials, or choose them here for a new connection." : "Use the email and password you chose in terminal setup on the host."}</p>`}</div><details class="terminal-setup" ${kind === "peer" ? "open" : ""}><summary>Set up your computer from the terminal</summary><p>Run these on the computer with Hermes installed. Setup prints an endpoint ticket to connect another device.</p>${command(clone, "copy-clone")}${command(setup, "copy-setup")}<p class="field-hint">Then run <code>./nectit app</code> to open this website locally. Start or stop the connection with <code>./nectit on</code> and <code>./nectit off</code>.</p></details><p class="connection-status"><span class="status-dot ${busy ? "pulse" : "off"}"></span>${busy ? "Starting Hermes and checking the connection…" : "Your workspace opens after the connection is verified."}</p>`;
 }
 function render() {
   const index = ["account", "address", "computer"].indexOf(step);
@@ -102,9 +108,9 @@ async function action(name) {
   if (name.startsWith("copy-")) {
     try {
       await navigator.clipboard.writeText(
-        name === "copy-clone" ? clone : setup,
+        name === "copy-pair" ? pairingCode.code : name === "copy-clone" ? clone : setup,
       );
-      toast("Command copied");
+      toast(name === "copy-pair" ? "Pairing code copied" : "Command copied");
     } catch {
       toast("Select the command to copy it.");
     }
@@ -112,7 +118,15 @@ async function action(name) {
   }
   try {
     if (name === "back") step = step === "computer" ? "address" : "account";
-    if (name === "host" || name === "peer") kind = name;
+    if (["host", "peer", "pair"].includes(name)) kind = name;
+    if (name === "pair-code") {
+      pairingCode = await api("/local/pair/code", {});
+      pairedDevices = (await api("/local/pair/devices")).devices;
+    }
+    if (name.startsWith("revoke:")) {
+      await api("/local/pair/revoke", { id: name.slice(7) });
+      pairedDevices = (await api("/local/pair/devices")).devices;
+    }
     if (name === "disconnect") {
       await api("/local/disconnect", {});
       status = await api("/local/status");
@@ -185,7 +199,10 @@ async function boot() {
     step = profile.signedIn
       ? /\/setup\/(address|computer)$/.exec(path)?.[1] || "address"
       : "account";
-    if (step === "computer") status = await api("/local/status");
+    if (step === "computer") {
+      status = await api("/local/status");
+      if (profile.features?.pairing && status.connection?.kind === "host") pairedDevices = (await api("/local/pair/devices")).devices;
+    }
     const hint = new URLSearchParams(location.search).get("notice");
     if (hint === "offline")
       notice =

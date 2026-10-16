@@ -359,5 +359,48 @@ Server(('127.0.0.1', port), Handler).serve_forever()
             thread.join(timeout=3)
 
 
+
+class SharedTerminalTests(unittest.TestCase):
+    def test_cli_uses_existing_backend_and_keeps_credential_out_of_arguments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state, data = root / "state", root / "app"
+            token = "d" * 64
+            cli.save_json(data / "cli-access.json", {"origin": "http://127.0.0.1:8788", "token": token})
+            args = cli.parser().parse_args(["cli", "--app-data", str(data), "--resume", "stored-chat", "--profile", "demo"])
+            with patch.object(cli, "http_json", return_value={"connected": True}) as request, \
+                    patch.object(cli.shutil, "which", return_value="/fixture/hermes"), \
+                    patch.object(cli.subprocess, "call", return_value=7) as launch, \
+                    patch("builtins.print") as output:
+                self.assertEqual(cli.cli_chat(state, args), 7)
+            command = launch.call_args.args[0]
+            env = launch.call_args.kwargs["env"]
+            self.assertEqual(command, ["/fixture/hermes", "--tui", "--resume", "stored-chat"])
+            self.assertNotIn(token, repr(command))
+            self.assertNotIn(token, repr(output.call_args_list))
+            url = cli.urllib.parse.urlsplit(env["HERMES_TUI_GATEWAY_URL"])
+            self.assertEqual(url.path, "/cli/api/ws")
+            self.assertEqual(cli.urllib.parse.parse_qs(url.query), {"token": [token], "profile": ["demo"]})
+            self.assertEqual(request.call_args.kwargs["token"], token)
+            cli.save_json(state / "app-connection.json", {"data_dir": str(data)})
+            args.app_data = None
+            with patch.dict(cli.os.environ, {}, clear=True), patch.object(cli, "http_json", return_value={"connected": True}):
+                self.assertEqual(cli.terminal_access(state, args)["token"], token)
+
+    def test_terminal_access_refuses_public_destinations_and_shared_credential_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            args = cli.parser().parse_args(["cli", "--app-data", str(root / "app")])
+            file = root / "app/cli-access.json"
+            for origin in ["https://foreign.example", "http://127.0.0.1:8788@foreign.example", "http://127.0.0.1:8788/path", "http://127.0.0.1:bad"]:
+                cli.save_json(file, {"origin": origin, "token": "f" * 64})
+                with patch.object(cli, "http_json") as request, self.assertRaises(cli.FlowniumError):
+                    cli.terminal_access(root / "state", args)
+                request.assert_not_called()
+            cli.save_json(file, {"origin": "http://127.0.0.1:8788", "token": "f" * 64})
+            file.chmod(0o644)
+            with self.assertRaisesRegex(cli.FlowniumError, "must be private"):
+                cli.terminal_access(root / "state", args)
+
 if __name__ == "__main__":
     unittest.main()

@@ -25,12 +25,14 @@ body {
   margin: 0;
 }
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 button,
 a,
-input {
+input,
+textarea {
   -webkit-tap-highlight-color: transparent;
 }
 button {
@@ -172,7 +174,9 @@ h1 {
   font-size: 12px;
   margin-bottom: 17px;
 }
-input {
+input,
+textarea {
+  display: block;
   color: var(--text);
   background: #171614;
   border: 1px solid #35312c;
@@ -187,11 +191,13 @@ input {
     border-color 0.15s,
     box-shadow 0.15s;
 }
-input:focus {
+input:focus,
+textarea:focus {
   border-color: #91bcb0;
   box-shadow: 0 0 0 3px #a8d8ce09;
 }
-input::placeholder {
+input::placeholder,
+textarea::placeholder {
   color: #66615a;
 }
 .privacy-note {
@@ -202,6 +208,15 @@ input::placeholder {
   gap: 7px;
   margin-top: 20px;
 }
+.sharing-panel { border: 1px solid var(--line); border-radius: 10px; padding: 18px; margin: 24px 0; }
+.sharing-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.sharing-title strong { font-size: 13px; font-weight: 500; }
+.sharing-panel > p { font-size: 12px; color: var(--muted); margin: 12px 0; line-height: 1.7; }
+.paired-list { margin: 16px 0; border-top: 1px solid var(--line); }
+.paired-list > div { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; }
+.paired-list span { font-size: 13px; overflow-wrap: anywhere; }
+.paired-list small { display: block; color: var(--dim); font-size: 11px; margin-top: 3px; }
+textarea { resize: vertical; font-family: var(--mono); font-size: 12px; }
 .card-footer {
   display: flex;
   align-items: center;
@@ -667,7 +682,8 @@ input::placeholder {
   .field {
     margin-bottom: 12px;
   }
-  input {
+  input,
+  textarea {
     min-height: 44px;
     margin-top: 6px;
     padding: 10px 12px;

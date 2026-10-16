@@ -63,7 +63,7 @@ export class IrohGateway {
     if (prefix) headers['x-forwarded-prefix'] = prefix;
     else delete headers['x-forwarded-prefix'];
     if (headers.cookie) headers.cookie = headers.cookie.split(';').filter(c => !/^(?:__Host-)?flownium(?:-oauth)?=/.test(c.trim())).join(';');
-    return { host: '127.0.0.1', port, method: request.method, path: request.url.slice(prefix.length) || '/', headers };
+    return { host: '127.0.0.1', port, method: request.method, path: (device.pathPrefix || '') + (request.url.slice(prefix.length) || '/'), headers };
   }
   async handle(request, response, route) {
     try {
@@ -71,6 +71,7 @@ export class IrohGateway {
       if (route.device.revoked) throw new Error('Laptop was revoked.');
       const proxy = http.request(this.options(request, port, route), upstream => {
         const headers = { ...upstream.headers };
+        if (route.stripCookies) delete headers['set-cookie'];
         const scoped = path => path === route.prefix || path.startsWith(route.prefix + '/');
         if (headers['set-cookie'] && route.prefix) headers['set-cookie'] = headers['set-cookie'].map(c =>
           c.replace(/;\s*Path=(\/[^;]*)/i, (attribute, path) => scoped(path) ? attribute : `; Path=${route.prefix}${path}`));
@@ -98,7 +99,8 @@ export class IrohGateway {
       const proxy = http.request(this.options(request, port, route));
       proxy.once('upgrade', (response, upstream, upstreamHead) => {
         socket.write(`HTTP/1.1 ${response.statusCode} ${response.statusMessage}\r\n` +
-          Object.entries(response.headers).map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n\r\n');
+          Object.entries(response.headers).filter(([k]) => !route.stripCookies || k !== 'set-cookie')
+            .map(([k, v]) => `${k}: ${v}`).join('\r\n') + '\r\n\r\n');
         if (upstreamHead.length) socket.write(upstreamHead);
         if (head.length) upstream.write(head);
         socket.pipe(upstream).pipe(socket);
