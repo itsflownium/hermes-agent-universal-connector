@@ -81,6 +81,7 @@ test("one-time pairing connects a second router, keeps the native cookie on the 
   let holdTicket, heldResponse;
   const backend = http.createServer((request, response) => {
     assert.equal(request.headers.cookie, "hermes=native-private");
+    response.setHeader("Set-Cookie", "hermes=native-private; Path=/; HttpOnly");
     response.setHeader("Content-Type", "application/json");
     if (request.url === "/api/status") response.end('{"version":"fixture"}');
     else if (request.url === "/api/auth/ws-ticket") {
@@ -94,7 +95,7 @@ test("one-time pairing connects a second router, keeps the native cookie on the 
     assert.equal(request.headers.cookie, "hermes=native-private");
     assert.equal(new URL(request.url, "http://local").searchParams.get("ticket"), "single-use-native-ticket");
     nativeSockets.add(socket); socket.once("close", () => nativeSockets.delete(socket));
-    socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n");
+    socket.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSet-Cookie: hermes=native-private; Path=/\r\n\r\n");
     if (head.length) socket.write(head);
     socket.on("data", (chunk) => socket.write(chunk));
   });
@@ -127,10 +128,15 @@ test("one-time pairing connects a second router, keeps the native cookie on the 
     const status = await (await client.request("/local/status", null, client.cookie)).json();
     assert.equal(status.connected, true);
     assert.equal(status.connection.fingerprint, code.fingerprint);
+    const nativeResponse = await client.request("/hermes/api/status", null, client.cookie);
+    assert.equal(nativeResponse.status, 200);
+    assert.equal(nativeResponse.headers.get("set-cookie"), null);
     const replay = await host.request("/pair/claim", { secret: decodePairingCode(code.code).secret, name: "Replay" });
     assert.equal(replay.status, 410);
     const channel = wireSocket(client, "/hermes/api/ws", { Cookie: client.cookie, Origin: client.origin });
-    assert.match(await channel.ready, /101 Switching Protocols/);
+    const handshake = await channel.ready;
+    assert.match(handshake, /101 Switching Protocols/);
+    assert.ok(!handshake.includes("native-private"));
     const closed = new Promise((done) => channel.socket.once("close", done));
     const devices = (await (await host.request("/local/pair/devices", null, host.cookie)).json()).devices;
     assert.equal(devices[0].name, "Test laptop");

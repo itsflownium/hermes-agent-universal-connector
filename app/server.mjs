@@ -461,7 +461,7 @@ export function createLocalApp({
         trackPaired(device.id, response);
         request.headers.cookie = settings.connection?.cookie || "";
         request.headers.origin = settings.connection?.publicUrl || currentOrigin;
-        await gateway.handle(request, response, { device: settings.connection, prefix: "/paired" });
+        await gateway.handle(request, response, { device: settings.connection, prefix: "/paired", stripCookies: true });
         return;
       }
       if (path.startsWith("/cli/")) cliAuth(request);
@@ -617,6 +617,7 @@ export function createLocalApp({
         await gateway.handle(request, response, {
           device: settings.connection,
           prefix: "/hermes",
+          stripCookies: true,
         });
         return;
       }
@@ -821,6 +822,7 @@ export function createLocalApp({
       await gateway.upgrade(request, socket, head, {
         device: settings.connection,
         prefix: terminal ? "/cli" : paired ? "/paired" : "/hermes",
+        stripCookies: true,
       });
     } catch {
       socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
