@@ -800,19 +800,22 @@ export function createLocalApp({
             !/^\/hermes\/api\/(ws|pub|events|pty|console)(?:\?|$)/.test(request.url))
           throw fail("Forbidden.", 403);
       }
+      // Track before awaiting the native ticket: revocation/sign-out must also
+      // close a socket whose upstream handshake is still being prepared.
+      const clients = terminal ? cliSockets : sockets;
+      clients.add(socket);
+      socket.once("close", () => clients.delete(socket));
+      if (pairedDevice) trackPaired(pairedDevice.id, socket);
       const { ticket } = await (
         await native("/api/auth/ws-ticket", { method: "POST" })
       ).json();
+      if (socket.destroyed) return;
       const wsUrl = new URL(request.url, currentOrigin);
       wsUrl.searchParams.delete("token");
       wsUrl.searchParams.delete("access");
       wsUrl.searchParams.set("ticket", ticket);
       request.url = wsUrl.pathname + wsUrl.search;
       request.headers.cookie = settings.connection.cookie;
-      const clients = terminal ? cliSockets : sockets;
-      clients.add(socket);
-      socket.once("close", () => clients.delete(socket));
-      if (pairedDevice) trackPaired(pairedDevice.id, socket);
       request.headers.origin = settings.connection.publicUrl;
 
       await gateway.upgrade(request, socket, head, {

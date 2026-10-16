@@ -78,11 +78,15 @@ function wireSocket(f, path, headers = {}) {
 
 test("one-time pairing connects a second router, keeps the native cookie on the host and revokes active sockets", async () => {
   const nativeSockets = new Set();
+  let holdTicket, heldResponse;
   const backend = http.createServer((request, response) => {
     assert.equal(request.headers.cookie, "hermes=native-private");
     response.setHeader("Content-Type", "application/json");
     if (request.url === "/api/status") response.end('{"version":"fixture"}');
-    else if (request.url === "/api/auth/ws-ticket") response.end('{"ticket":"single-use-native-ticket"}');
+    else if (request.url === "/api/auth/ws-ticket") {
+      if (holdTicket) { heldResponse = response; holdTicket(); }
+      else response.end('{"ticket":"single-use-native-ticket"}');
+    }
     else if (request.url === "/") response.end('<html><head><script src="./assets/index-live.js"></script></head></html>');
     else { response.writeHead(404); response.end("{}"); }
   });
@@ -131,12 +135,23 @@ test("one-time pairing connects a second router, keeps the native cookie on the 
     const devices = (await (await host.request("/local/pair/devices", null, host.cookie)).json()).devices;
     assert.equal(devices[0].name, "Test laptop");
     assert.ok(!JSON.stringify(devices).includes("tokenHash"));
+    const ticketRequested = new Promise((done) => { holdTicket = done; });
+    const pending = wireSocket(host, "/paired/api/ws", { Cookie: state.cookie });
+    const rejected = pending.ready.catch(() => {});
+    await ticketRequested;
+    const pendingClosed = new Promise((done) => pending.socket.once("close", done));
     await host.request("/local/pair/revoke", { id: devices[0].id }, host.cookie);
-    await Promise.race([closed, new Promise((_, reject) => setTimeout(() => reject(new Error("Revoked socket stayed open")), 3000))]);
+    let revokeTimer;
+    try {
+      await Promise.race([Promise.all([closed, pendingClosed, rejected]), new Promise((_, reject) => {
+        revokeTimer = setTimeout(() => reject(new Error("Revoked socket stayed open")), 3000);
+      })]);
+    } finally { clearTimeout(revokeTimer); heldResponse?.end('{"ticket":"single-use-native-ticket"}'); }
     assert.equal((await client.request("/hermes/api/status", null, client.cookie)).status, 401);
     const bootstrap = await (await client.request("/local/bootstrap", null, client.cookie)).text();
     assert.ok(!bootstrap.includes(state.cookie));
   } finally {
+    heldResponse?.end();
     await client.close(); await host.close();
     for (const socket of transportSockets) socket.destroy();
     await new Promise((done) => transport.close(done));
