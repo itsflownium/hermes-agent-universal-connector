@@ -63,7 +63,7 @@ export class IrohGateway {
     if (prefix) headers['x-forwarded-prefix'] = prefix;
     else delete headers['x-forwarded-prefix'];
     if (headers.cookie) headers.cookie = headers.cookie.split(';').filter(c => !/^(?:__Host-)?flownium(?:-oauth)?=/.test(c.trim())).join(';');
-    return { host: '127.0.0.1', port, method: request.method, path: request.url.slice(prefix.length) || '/', headers };
+    return { host: '127.0.0.1', port, method: request.method, path: (device.pathPrefix || '') + (request.url.slice(prefix.length) || '/'), headers };
   }
   async handle(request, response, route) {
     try {

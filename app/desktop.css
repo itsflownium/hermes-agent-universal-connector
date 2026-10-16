@@ -73,3 +73,32 @@
 button[aria-label="HUD mode"] {
   display: none;
 }
+
+#nectit-cli-chats {
+  margin: auto; inset: 0; box-sizing: border-box;
+  width: min(640px, calc(100vw - 28px)); max-height: calc(100svh - 40px); overflow: auto;
+  background: #141513; color: #e6e8e2; border: 1px solid #3b4039; border-radius: 16px;
+  padding: 24px; font: 13px/1.6 system-ui; box-shadow: 0 24px 100px #0008;
+}
+#nectit-cli-chats::backdrop { background: #0009; backdrop-filter: blur(5px); }
+#nectit-cli-chats header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+#nectit-cli-chats header span { color: #99b8a7; font-size: 10px; letter-spacing: .08em; }
+#nectit-cli-chats h2 { margin: 7px 0 13px; font-size: 23px; font-weight: 550; letter-spacing: -.6px; }
+#nectit-cli-chats p { color: #a4aba0; margin: 0 0 18px; }
+#nectit-cli-chats button { border: 1px solid #3a453b; border-radius: 7px; color: #c4e2ce; background: #26322a; padding: 7px 12px; cursor: pointer; font: inherit; }
+#nectit-cli-chats button:disabled { opacity: .5; cursor: wait; }
+#nectit-cli-chats header > button { background: transparent; padding: 0 7px; font-size: 23px; }
+#nectit-cli-chats input { display: block; width: 100%; background: #0e100e; border: 1px solid #3b4039; color: #e6e8e2; border-radius: 7px; padding: 10px 12px; margin-top: 5px; font: inherit; }
+#nectit-cli-chats label { font-size: 11px; color: #a4aba0; }
+.nectit-cli-fields { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 13px; }
+.nectit-cli-fields label { flex: 1; }
+#nectit-cli-chats .nectit-cli-fields > button { min-height: 42px; }
+.nectit-cli-search { display: block; margin-bottom: 18px; }
+#nectit-cli-results { min-height: 80px; max-height: 280px; overflow: auto; }
+.nectit-cli-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 0; border-top: 1px solid #ffffff10; }
+.nectit-cli-row > div { min-width: 0; }
+.nectit-cli-row strong { display: block; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.nectit-cli-row span { display: block; color: #7e877a; font-size: 10px; margin-top: 5px; overflow-wrap: anywhere; }
+#nectit-cli-chats footer { border-top: 1px solid #ffffff10; margin-top: 18px; padding-top: 16px; font-size: 11px; }
+#nectit-cli-chats footer p { margin: 5px 0 0; line-height: 1.8; }
+#nectit-cli-chats code { color: #bdd9c4; font-size: .95em; }

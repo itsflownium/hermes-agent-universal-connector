@@ -810,6 +810,77 @@ def app(state, args):
                 stop_child(process)
 
 
+def terminal_access(state, args):
+    pointer = read_json(state / "app-connection.json", {})
+    data_dir = Path(args.app_data or os.environ.get("FLOWNIUM_APP_DATA") or
+                    pointer.get("data_dir") or HERE.parent / "work/local-app").expanduser().resolve()
+    path = data_dir / "cli-access.json"
+    if not path.is_file():
+        raise FlowniumError("Start './nectit app' and connect your computer first. Use --app-data PATH for a different app directory.")
+    if path.stat().st_mode & 0o077:
+        raise FlowniumError("The terminal credential file must be private (chmod 600 cli-access.json).")
+    access = read_json(path)
+    origin = access.get("origin", "")
+    try:
+        parts = urllib.parse.urlsplit(origin)
+        local_port = parts.port
+    except (ValueError, TypeError):
+        raise FlowniumError("Invalid local terminal access file. Restart './nectit app'.") from None
+    if (parts.scheme != "http" or parts.hostname != "127.0.0.1" or parts.username or parts.password or
+            not local_port or parts.path or parts.query or parts.fragment or
+            not re.fullmatch(r"[a-f0-9]{64}", access.get("token", ""))):
+        raise FlowniumError("Invalid local terminal access file. Restart './nectit app'.")
+    try:
+        status = http_json(origin + "/cli/status", token=access["token"])
+    except FlowniumError:
+        raise FlowniumError("The Nectit app is unavailable. Start './nectit app' and connect your computer first.") from None
+    if not status.get("connected"):
+        raise FlowniumError("Connect your Hermes computer in the Nectit website first.")
+    return access
+
+
+def cli_chat(state, args):
+    access = terminal_access(state, args)
+    if args.profile and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", args.profile):
+        raise FlowniumError("Use an existing Hermes profile name.")
+    if args.resume and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,159}", args.resume):
+        raise FlowniumError("Use the session ID shown by Hermes or Nectit's CLI chats picker.")
+    config = read_json(state / "config.json", {})
+    binary = args.hermes_bin or config.get("hermes_bin") or "hermes"
+    resolved = shutil.which(binary)
+    if not resolved:
+        raise FlowniumError("Install the Hermes CLI on this computer, or pass --hermes-bin PATH.")
+    query = {"token": access["token"]}
+    if args.profile:
+        query["profile"] = args.profile
+    env = os.environ.copy()
+    env["HERMES_TUI_GATEWAY_URL"] = access["origin"].replace("http://", "ws://", 1) + "/cli/api/ws?" + urllib.parse.urlencode(query)
+    command = [resolved, "--tui"]
+    if args.resume:
+        command += ["--resume", args.resume]
+    print("Connected to Nectit. Open CLI chats in the web workspace to continue this conversation.", flush=True)
+    # The credential stays in the environment, never in process arguments/output.
+    return subprocess.call(command, env=env)
+
+
+def pair_device(state, args):
+    access = terminal_access(state, args)
+    base = access["origin"] + "/cli/pair/"
+    if args.pair_command == "code":
+        result = http_json(base + "code", data={}, token=access["token"], timeout=25)
+        print(result["code"])
+        print("\nPaste into Nectit → Computer → Pair a computer.")
+        print("Works once. Expires in 5 minutes. Keep this code private.")
+        print("Host fingerprint: " + result["fingerprint"])
+    elif args.pair_command == "devices":
+        for device in http_json(base + "devices", token=access["token"])["devices"]:
+            print(f"{device['id']}  {device['name']}  {'revoked' if device['revoked'] else 'paired'}")
+    else:
+        http_json(base + "revoke", data={"id": args.device_id}, token=access["token"])
+        print("Device revoked. Its active connections have been closed.")
+    return 0
+
+
 def parser():
     result = argparse.ArgumentParser(description="Connect real Hermes on your laptop to Nectit.")
     result.add_argument("--version", action="version", version=VERSION)
@@ -843,6 +914,18 @@ def parser():
     command = sub.add_parser("app", help="Open the local desktop-style Hermes Agent website")
     command.add_argument("--port", type=int, default=8788)
     command.add_argument("--no-browser", action="store_true")
+    command = sub.add_parser("cli", help="Start or resume a Hermes terminal chat shared with the web workspace")
+    command.add_argument("--resume", metavar="SESSION_ID")
+    command.add_argument("--profile")
+    command.add_argument("--hermes-bin")
+    command.add_argument("--app-data", help="Private app directory, when not using the running controller's app")
+    command = sub.add_parser("pair", help="Pair another Nectit device with a one-time Iroh code")
+    command.add_argument("--app-data")
+    pairing = command.add_subparsers(dest="pair_command", required=True)
+    pairing.add_parser("code", help="Create a one-use code that expires in five minutes")
+    pairing.add_parser("devices", help="List paired devices")
+    revoke = pairing.add_parser("revoke", help="Revoke a paired device and close its connections")
+    revoke.add_argument("device_id")
     command = sub.add_parser("on", help="Start Hermes and the configured Iroh or Cloudflare transport")
     command.add_argument("--desktop", action="store_true", help="Use the installed desktop renderer for the Nectit web workspace")
     command = sub.add_parser("off", help="Stop only the processes managed by Nectit")
@@ -882,6 +965,10 @@ def main(argv=None):
             return 0
         if args.command == "app":
             return app(state, args)
+        if args.command == "cli":
+            return cli_chat(state, args)
+        if args.command == "pair":
+            return pair_device(state, args)
         if args.command == "open":
             config = load_config(state)
             if config.get("desktop_renderer"):

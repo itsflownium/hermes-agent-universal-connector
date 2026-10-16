@@ -21,6 +21,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { IrohGateway } from "../service/iroh-gateway.mjs";
 import { emailAddress } from "./auth.mjs";
+import { Pairing, IrohPublisher, decodePairingCode, profileName, sessionId, transportFetch } from "./pairing.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -40,6 +41,7 @@ export function createLocalApp({
   python = process.env.FLOWNIUM_PYTHON || "python3",
   port = 8788,
   publicOrigin = process.env.NECTIT_PUBLIC_ORIGIN || null,
+  publisherFactory = null,
 } = {}) {
   if (publicOrigin) {
     const external = new URL(publicOrigin);
@@ -63,6 +65,8 @@ export function createLocalApp({
     : {};
   const sessions = new Map(),
     sockets = new Set(),
+    cliSockets = new Set(),
+    pairedTraffic = new Map(),
     attempts = new Map();
   const destination = () =>
     settings.setupComplete ? "/w/" + settings.slug : "/setup/address";
@@ -97,6 +101,39 @@ export function createLocalApp({
     writeFileSync(temp, JSON.stringify(settings), { mode: 0o600 });
     renameSync(temp, file);
   };
+  const cliToken = randomBytes(32).toString("hex");
+  const cliFile = join(dataDir, "cli-access.json");
+  const cliAuth = (request, token = null) => {
+    const peer = request.socket.remoteAddress;
+    if (!["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(peer) || request.headers.origin ||
+        !timingSafeEqual(Buffer.from(hash(token || request.headers.authorization?.replace(/^Bearer /, "") || "")), Buffer.from(hash(cliToken))))
+      throw fail("Local terminal access denied.", 401);
+  };
+  let publisher;
+  const pairing = new Pairing({ settings, save,
+    publisher: {
+      start: () => {
+        publisher ||= publisherFactory
+          ? publisherFactory({ port: server.address().port, binary, dataDir })
+          : new IrohPublisher({ port: server.address().port, binary, dataDir });
+        return publisher.start();
+      },
+      close: () => publisher?.close(),
+    },
+    onRevoke: (id) => {
+      for (const item of pairedTraffic.get(id) || []) item.destroy();
+      pairedTraffic.delete(id);
+    },
+  });
+  function trackPaired(id, item) {
+    if (!pairedTraffic.has(id)) pairedTraffic.set(id, new Set());
+    pairedTraffic.get(id).add(item);
+    item.once("close", () => pairedTraffic.get(id)?.delete(item));
+  }
+  const pairedCredential = (request) => cookieValue(request, "nectit-device");
+  const nativePathAllowed = (path) =>
+    /^\/(?:api\/|assets\/|fonts\/|fonts-terminal\/|ds-assets\/|emojibase\/|hermes-frames\/)/.test(path) ||
+    /^\/(?:hermes(?:-sprite)?\.png|nous-girl(?:-dark)?\.png|apple-touch-icon\.png)$/.test(path);
   const gateway = new IrohGateway({
     binary,
     keyFile: join(dataDir, "iroh-key"),
@@ -207,10 +244,12 @@ export function createLocalApp({
     const device = settings.connection;
     if (!device) throw fail("Connect a Hermes computer first.", 409);
     const targetPort = await gateway.connect(device);
-    const response = await fetch(`http://127.0.0.1:${targetPort}${path}`, {
+    const fetcher = device.pathPrefix ? transportFetch : fetch;
+    const response = await fetcher(`http://127.0.0.1:${targetPort}${device.pathPrefix || ""}${path}`, {
       method,
       headers: {
         Origin: `http://127.0.0.1:${targetPort}`,
+        ...(device.pathPrefix ? { Host: new URL(device.publicUrl).host } : {}),
         ...(cookie ? { Cookie: cookie } : {}),
         ...(data ? { "Content-Type": "application/json" } : {}),
       },
@@ -223,7 +262,7 @@ export function createLocalApp({
         path === "/auth/password-login"
           ? "Hermes rejected the sharing email or password."
           : response.status === 401 || response.status === 403
-            ? "Hermes sign-in expired. Reconnect your computer."
+            ? device.pathPrefix ? "This device was disconnected or revoked. Pair it again from the host." : "Hermes sign-in expired. Reconnect your computer."
             : "Hermes is unavailable. Check that its computer is awake and online.",
         response.status === 401 ? 409 : 503,
       );
@@ -231,6 +270,7 @@ export function createLocalApp({
   }
   async function connect(input, currentOrigin) {
     if (starting) throw fail("A connection is already starting.", 409);
+    if (input.kind === "pair") return connectPaired(input, currentOrigin);
     if (input.kind !== "host" && input.kind !== "peer")
       throw fail("Choose a computer.");
     if (
@@ -343,6 +383,44 @@ export function createLocalApp({
       starting = false;
     }
   }
+  async function connectPaired(input, currentOrigin) {
+    const code = decodePairingCode(input.code);
+    starting = true;
+    errorMessage = null;
+    const previous = settings.connection;
+    const device = { id: randomUUID(), kind: "peer", irohTicket: code.ticket,
+      publicUrl: `http://127.0.0.1:${code.port}`, pathPrefix: "/paired" };
+    try {
+      if (binary === join(root, "work/bin/dumbpipe") && !existsSync(binary))
+        await command(["--prepare-only"], "", true);
+      const targetPort = await gateway.connect(device);
+      const response = await transportFetch(`http://127.0.0.1:${targetPort}/pair/claim`, {
+        method: "POST", headers: { "Content-Type": "application/json", Host: `127.0.0.1:${code.port}` },
+        body: JSON.stringify({ secret: code.secret, name: input.name || "Browser device" }),
+        redirect: "manual", signal: AbortSignal.timeout(15000),
+      });
+      const grant = await response.json();
+      if (!response.ok) throw fail(grant.error || "The host could not pair this device.", response.status);
+      if (!/^[a-f0-9-]{36}$/.test(grant.id || "") || !/^[a-f0-9]{64}$/.test(grant.token || ""))
+        throw fail("The host returned an invalid pairing response.", 503);
+      device.cookie = `nectit-device=${grant.id}.${grant.token}`;
+      device.pairId = grant.id;
+      device.fingerprint = hash(code.ticket).slice(0, 16);
+      settings.connection = device;
+      const status = await (await native("/api/status")).json();
+      device.version = status.version;
+      if (!isDesktop(await (await native("/")).text()))
+        throw fail("The host needs the Nectit desktop renderer enabled.", 409);
+      settings.setupComplete = true;
+      save();
+      if (previous?.kind === "peer") gateway.disconnect(previous.id);
+    } catch (problem) {
+      settings.connection = previous;
+      gateway.disconnect(device.id);
+      errorMessage = problem.message;
+      throw problem;
+    } finally { starting = false; }
+  }
   function isDesktop(html) {
     return /<script[^>]+src=["']\.\/assets\/index-/.test(html);
   }
@@ -370,6 +448,39 @@ export function createLocalApp({
         path = url.pathname;
       if (!request.url.startsWith("/") || request.url.startsWith("//"))
         throw fail("Invalid path.");
+      if (path === "/pair/claim" && request.method === "POST") {
+        rate("pair-claim");
+        const input = await body(request);
+        json(response, pairing.claim(input.secret, input.name));
+        return;
+      }
+      if (path.startsWith("/paired/")) {
+        const device = pairing.authenticate(pairedCredential(request));
+        const inner = path.slice("/paired".length);
+        if (inner !== "/" && !nativePathAllowed(inner)) throw fail("Not found.", 404);
+        trackPaired(device.id, response);
+        request.headers.cookie = settings.connection?.cookie || "";
+        request.headers.origin = settings.connection?.publicUrl || currentOrigin;
+        await gateway.handle(request, response, { device: settings.connection, prefix: "/paired" });
+        return;
+      }
+      if (path.startsWith("/cli/")) cliAuth(request);
+      if (path === "/cli/status" && request.method === "GET") {
+        json(response, { connected: !!settings.connection && !!settings.setupComplete,
+          url: `${currentOrigin}/w/${settings.slug || "my-hermes"}` });
+        return;
+      }
+      const privatePair = path.startsWith("/cli/pair/");
+      if (path.startsWith("/local/pair/")) authenticate(request);
+      if ((privatePair || path.startsWith("/local/pair/")) && request.method === "GET" && path.endsWith("/devices")) {
+        json(response, { devices: pairing.devices() }); return;
+      }
+      if (privatePair && request.method === "POST") {
+        if (path.endsWith("/code")) { await native("/api/status"); json(response, await pairing.code(server.address().port)); }
+        else if (path.endsWith("/revoke")) { pairing.revoke((await body(request)).id); json(response, { revoked: true }); }
+        else throw fail("Not found.", 404);
+        return;
+      }
       if (request.method !== "GET" && request.headers.origin !== currentOrigin)
         throw fail("Reload this page before submitting.", 403);
       if (path === "/local/bootstrap" && request.method === "GET") {
@@ -380,6 +491,7 @@ export function createLocalApp({
         } catch {}
         json(response, {
           product: "nectit",
+          features: { pairing: true, cliChats: true },
           configured: !!settings.account,
           signedIn,
           email: signedIn ? settings.account.email : "",
@@ -431,6 +543,34 @@ export function createLocalApp({
       }
       if (path.startsWith("/local/") || path.startsWith("/hermes/"))
         authenticate(request);
+      if (path === "/local/pair/code" && request.method === "POST") {
+        rate("pair-code"); await native("/api/status"); json(response, await pairing.code(server.address().port)); return;
+      }
+      if (path === "/local/pair/revoke" && request.method === "POST") {
+        pairing.revoke((await body(request)).id); json(response, { revoked: true }); return;
+      }
+      if (path === "/local/cli-sessions" && request.method === "GET") {
+        const profile = url.searchParams.get("profile") || "";
+        if (!profileName(profile)) throw fail("Invalid Hermes profile.");
+        const query = new URLSearchParams({ sources: "cli,tui", limit: "50", order: "recent", min_messages: "1" });
+        if (profile) query.set("profile", profile);
+        const result = await (await native("/api/sessions?" + query)).json();
+        const rows = (Array.isArray(result.sessions) ? result.sessions : []).filter((s) => sessionId(s.id));
+        json(response, { sessions: rows.map((s) => ({ id: s.id, title: String(s.title || "Untitled CLI chat").slice(0, 200),
+          source: s.source, profile: profile || s.profile || "", lastActive: s.last_active || s.started_at,
+          messageCount: s.message_count || 0 })) });
+        return;
+      }
+      if (path === "/local/cli-open" && request.method === "POST") {
+        const input = await body(request);
+        if (!sessionId(input.id) || !profileName(input.profile)) throw fail("Invalid chat or profile.");
+        const query = input.profile ? "?profile=" + encodeURIComponent(input.profile) : "";
+        const result = await (await native("/api/sessions/" + encodeURIComponent(input.id) + query)).json();
+        const row = result.session || result;
+        if (row.id !== input.id) throw fail("This chat is no longer available. Refresh the list.", 404);
+        json(response, { url: "/w/" + settings.slug + query + "#/" + encodeURIComponent(input.id) });
+        return;
+      }
       if (path === "/local/renderer" && request.method === "GET") {
         const { revision } = await renderer();
         const status = await (await native("/api/status")).json();
@@ -472,15 +612,7 @@ export function createLocalApp({
         // The laptop's renderer and APIs stay behind the Nectit session. Native
         // cookies never enter the browser; only this router sends them upstream.
         const inner = path.slice("/hermes".length);
-        if (
-          !/^\/(?:api\/|assets\/|fonts\/|fonts-terminal\/|ds-assets\/|emojibase\/|hermes-frames\/)/.test(
-            inner,
-          ) &&
-          !/^\/(?:hermes(?:-sprite)?\.png|nous-girl(?:-dark)?\.png|apple-touch-icon\.png)$/.test(
-            inner,
-          )
-        )
-          throw fail("Not found.", 404);
+        if (!nativePathAllowed(inner)) throw fail("Not found.", 404);
         request.headers.cookie = settings.connection?.cookie || "";
         await gateway.handle(request, response, {
           device: settings.connection,
@@ -520,6 +652,8 @@ export function createLocalApp({
                 version: connection.version,
                 ticket: connection.irohTicket,
                 email: connection.email,
+                paired: !!connection.pathPrefix,
+                fingerprint: connection.fingerprint,
               }
             : null,
         });
@@ -534,7 +668,8 @@ export function createLocalApp({
         if (starting) throw fail("Wait for setup to finish.", 409);
         if (settings.connection?.kind === "host") await command(["off"]);
         if (settings.connection) gateway.disconnect(settings.connection.id);
-        for (const socket of sockets) socket.destroy();
+        for (const socket of [...sockets, ...cliSockets]) socket.destroy();
+        for (const device of pairing.devices()) if (!device.revoked) pairing.revoke(device.id);
         settings.connection = null;
         save();
         json(response, { disconnected: true });
@@ -548,7 +683,7 @@ export function createLocalApp({
         });
         return;
       }
-      if (path.startsWith("/local/") || path.startsWith("/hermes/"))
+      if (path.startsWith("/local/") || path.startsWith("/hermes/") || path.startsWith("/cli/"))
         throw fail("Not found.", 404);
       if (request.method !== "GET") throw fail("Not found.", 404);
       if (/^\/w\/[a-z0-9-]+\/?$/.test(path)) {
@@ -586,10 +721,12 @@ export function createLocalApp({
           response.end();
           return;
         }
+        const profile = url.searchParams.get("profile") || "";
+        if (!profileName(profile)) throw fail("Invalid Hermes profile.");
         const { html, revision } = rendered,
           nonce = randomBytes(18).toString("base64");
         const boot =
-          '<base href="/hermes/"><meta name="nectit-renderer-revision" content="' +
+          '<base href="/hermes/"><meta name="nectit-profile" content="' + profile + '"><meta name="nectit-renderer-revision" content="' +
           revision +
           '"><script nonce="' +
           nonce +
@@ -610,6 +747,7 @@ export function createLocalApp({
       }
       const staticFiles = {
         "/desktop-bridge.js": ["desktop-bridge.js", "text/javascript"],
+        "/cli-dialog.js": ["cli-dialog.js", "text/javascript"],
         "/desktop.css": ["desktop.css", "text/css"],
         "/app.js": ["app.js", "text/javascript"],
         "/style.css": ["style.css", "text/css"],
@@ -650,37 +788,60 @@ export function createLocalApp({
   server.on("upgrade", async (request, socket, head) => {
     try {
       const currentOrigin = origin(request);
-      authenticate(request);
-      if (
-        request.headers.origin !== currentOrigin ||
-        !/^\/hermes\/api\/(ws|pub|events|pty|console)(?:\?|$)/.test(request.url)
-      )
-        throw fail("Forbidden.", 403);
+      const incoming = new URL(request.url, currentOrigin);
+      const terminal = incoming.pathname === "/cli/api/ws";
+      const paired = incoming.pathname === "/paired/api/ws";
+      let pairedDevice;
+      if (terminal) cliAuth(request, incoming.searchParams.get("token"));
+      else if (paired) pairedDevice = pairing.authenticate(pairedCredential(request));
+      else {
+        authenticate(request);
+        if (request.headers.origin !== currentOrigin ||
+            !/^\/hermes\/api\/(ws|pub|events|pty|console)(?:\?|$)/.test(request.url))
+          throw fail("Forbidden.", 403);
+      }
       const { ticket } = await (
         await native("/api/auth/ws-ticket", { method: "POST" })
       ).json();
       const wsUrl = new URL(request.url, currentOrigin);
       wsUrl.searchParams.delete("token");
+      wsUrl.searchParams.delete("access");
       wsUrl.searchParams.set("ticket", ticket);
       request.url = wsUrl.pathname + wsUrl.search;
       request.headers.cookie = settings.connection.cookie;
-      sockets.add(socket);
-      socket.once("close", () => sockets.delete(socket));
+      const clients = terminal ? cliSockets : sockets;
+      clients.add(socket);
+      socket.once("close", () => clients.delete(socket));
+      if (pairedDevice) trackPaired(pairedDevice.id, socket);
+      request.headers.origin = settings.connection.publicUrl;
+
       await gateway.upgrade(request, socket, head, {
         device: settings.connection,
-        prefix: "/hermes",
+        prefix: terminal ? "/cli" : paired ? "/paired" : "/hermes",
       });
     } catch {
       socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
     }
+  });
+  server.once("listening", () => {
+    writeFileSync(cliFile, JSON.stringify({ origin: `http://127.0.0.1:${server.address().port}`, token: cliToken }), { mode: 0o600 });
+    chmodSync(cliFile, 0o600);
+    mkdirSync(hostState, { recursive: true, mode: 0o700 });
+    const pointer = join(hostState, "app-connection.json");
+    writeFileSync(pointer, JSON.stringify({ data_dir: dataDir, origin: `http://127.0.0.1:${server.address().port}` }), { mode: 0o600 });
+    chmodSync(pointer, 0o600);
   });
   server.requestTimeout = 210_000;
   server.headersTimeout = 15_000;
   return {
     server,
     settings,
+    gateway,
+    pairing,
     async close() {
-      for (const socket of sockets) socket.destroy();
+      for (const socket of [...sockets, ...cliSockets]) socket.destroy();
+      for (const items of pairedTraffic.values()) for (const item of items) item.destroy();
+      pairing.close();
       gateway.close();
       if (startedHost)
         await command(["off", "--if-run-id", startedHost]).catch(() => {});

@@ -43,12 +43,66 @@ website use the same controller state, so `./nectit off`, `on`, `status` and
 stops a host it started in that run, and preserves a host already running when
 it connected. `--state-dir PATH` selects an isolated controller.
 
-On another computer, clone the repository and run `./nectit app`. Select **Another
-computer** in setup and paste the host ticket. This device needs Node and Python
-for the local gateway, but it does not need Hermes. The host must have been
-started with `./setup --desktop` (or upgraded with `./nectit on --desktop`).
-The older `./setup --mode client` / `./nectit access` commands are for the native
-Hermes dashboard and should be paired with a host started without `--desktop`.
+## Pair another computer with a code
+
+Keep `./nectit app` running on the computer with Hermes connected. In another
+terminal on that host:
+
+```sh
+./nectit pair code
+```
+
+On the other computer, clone the repository and run `./nectit app`. Create its
+own local account, choose **Pair a computer**, paste the code, name the device,
+and open Hermes. No sharing password has to be copied. The code works once and
+expires in five minutes; requesting another replaces an unused code. Compare the
+host fingerprint shown on both computers. The connected Computer page also has
+**Create pairing code** and **Revoke** controls.
+
+```sh
+./nectit pair devices
+./nectit pair revoke DEVICE_ID
+```
+
+Each device gets its own random credential; only its hash is kept on the host.
+Revocation closes that device's active sockets/streams and rejects later
+requests. Codes and device credentials grant access to your Hermes computer,
+so share them only with devices you trust. Keep both local Nectit apps running.
+Closing the host app closes its pairing listener. It does not publish a public
+website or create DNS.
+
+The endpoint-ticket/email/password connection remains available as **Endpoint
+ticket**. The older `./setup --mode client` / `./nectit access` commands are for
+the native Hermes dashboard and should use a host started without `--desktop`.
+
+## Continue the same terminal chat on the website
+
+With the Nectit app connected, start an actual Hermes TUI in another terminal:
+
+```sh
+./nectit cli
+# Resume an existing conversation on that same backend:
+./nectit cli --resume SESSION_ID
+# Select a profile when needed:
+./nectit cli --resume SESSION_ID --profile PROFILE_NAME
+```
+
+In the web workspace, select **CLI chats**, choose the matching profile, find
+the conversation and click **Continue**. Send its first message before refreshing
+the picker: unused drafts are not saved by Hermes. The TUI and desktop renderer
+attach to the same Hermes runtime; messages and streamed replies appear in both.
+The local terminal credential is a private `0600` file, kept out of HTML, public
+API responses, process arguments and printed output. `--app-data PATH` selects
+another app directory; the launcher normally discovers its app automatically.
+
+**An already-running standalone `hermes` process needs a handoff.** Wait for its
+current turn to finish, run `/exit` in that terminal, then select the saved chat
+from **CLI chats**. Its conversation history is resumed without copying or
+forking the chat. Hermes's writer-ownership checks remain enforced; Nectit never
+kills the original process, takes its lease or claims to attach to a process
+that exposes no shared runtime. Launch subsequent shared chats with
+`./nectit cli`. A changed renderer/transport contract in future Hermes versions
+may need a Nectit adapter update.
 
 ## How desktop updates reach the website
 
@@ -118,7 +172,7 @@ platform work, not functionality simulated by this local preview.
 ## Development and private data
 
 ```sh
-node --test app/server.test.mjs
+node --test app/server.test.mjs app/pairing.test.mjs
 ```
 
 App state and the native session cookie are private files under `work/local-app`
@@ -131,6 +185,15 @@ Electron executable/preload bundles are not exposed by the static routes.
 `FLOWNIUM_APP_PORT`, `FLOWNIUM_APP_DATA`, `FLOWNIUM_APP_HOST_STATE`,
 `FLOWNIUM_IROH_BIN`, and `FLOWNIUM_PYTHON` remain compatible environment overrides.
 Restart Node after server changes; setup assets are read from source on refresh.
+
+An opt-in integration check pairs two real Iroh endpoints against an already
+connected host, validates the current Hermes API/renderer, and revokes the peer:
+
+```sh
+node tests/live_pairing_check.mjs --app-data work/local-app
+# Also verify read-only attachment to a known conversation (no inference):
+node tests/live_pairing_check.mjs --app-data work/local-app --resume SESSION_ID --profile PROFILE_NAME
+```
 
 The supplied screenshots and [Io](https://coralinelabs.io) informed the restrained
 centered setup layout. Nectit uses its own branding, composition and colors.

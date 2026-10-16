@@ -9,12 +9,13 @@
   const initialRevision = document.querySelector(
     'meta[name="nectit-renderer-revision"]',
   ).content;
+  const initialProfile = document.querySelector('meta[name="nectit-profile"]')?.content || "";
   let latestRevision = initialRevision;
   let latestVersion;
   const ws = (profile) =>
     location.origin.replace(/^http/, "ws") +
     "/hermes/api/ws" +
-    (profile ? "?profile=" + encodeURIComponent(profile) : "");
+    (profile || initialProfile ? "?profile=" + encodeURIComponent(profile || initialProfile) : "");
   async function local(path, data) {
     const response = await fetch(
       path,
@@ -46,7 +47,7 @@
   }
   async function api(request) {
     owner(request);
-    return local("/local/desktop-api", request);
+    return local("/local/desktop-api", { ...request, profile: request.profile || initialProfile || undefined });
   }
   function banner(message, label, action) {
     document.querySelector("#nectit-notice")?.remove();
@@ -89,7 +90,7 @@
       connectionId: "nectit",
       registryScoped: true,
       sharedRemote: true,
-      profile: profile || undefined,
+      profile: profile || initialProfile || undefined,
       isFullscreen: !!document.fullscreenElement,
       isMaximized: true,
       customWindowControls: false,
@@ -195,8 +196,8 @@
       setLaunchMode: unsupported,
     },
     profile: {
-      get: async () => ({ profile: null }),
-      getDefault: async () => preference("defaultProfile"),
+      get: async () => ({ profile: initialProfile || null }),
+      getDefault: async () => initialProfile || preference("defaultProfile"),
       setDefault: async (value) => savePreference("defaultProfile", value),
       onDefaultChanged: subscribe,
       onChanged: subscribe,
@@ -346,7 +347,7 @@
   window.addEventListener("focus", () => void revisionCheck());
   setInterval(revisionCheck, 45000);
   void revisionCheck();
-  document.addEventListener("DOMContentLoaded", () => {
+  document.addEventListener("DOMContentLoaded", async () => {
     const controls = document.createElement("nav");
     controls.id = "nectit-controls";
     controls.setAttribute("aria-label", "Nectit connection");
@@ -360,7 +361,17 @@
       await local("/local/signout", {});
       location.replace("/setup/account");
     };
-    controls.append(home, exit);
+    const chats = document.createElement("button");
+    chats.textContent = "CLI chats";
+    chats.onclick = async () => {
+      const { openCliChats } = await import("/cli-dialog.js");
+      await openCliChats({ local, profile: initialProfile });
+    };
+    controls.append(home);
+    try {
+      if ((await local("/local/bootstrap")).features?.cliChats) controls.append(chats);
+    } catch { /* Keep connection controls available on older routers. */ }
+    controls.append(exit);
     document.body.append(controls);
   });
 })();

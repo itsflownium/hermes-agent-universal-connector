@@ -26,6 +26,27 @@ Nothing is deployed by these commands. Any-device browser access needs a reachab
 HTTPS gateway; Iroh links that gateway to your laptop. See [app setup and gateway
 configuration](app/README.md) for the complete flow, updates and current limits.
 
+## Pair devices and continue terminal chats
+
+Keep the host website running, then use another terminal:
+
+```sh
+./nectit pair code                  # One-use code, valid for five minutes
+./nectit pair devices
+./nectit pair revoke DEVICE_ID
+./nectit cli                        # Real Hermes TUI, shared with the website
+./nectit cli --resume SESSION_ID
+```
+
+On the other computer, run its own `./nectit app` and paste the code in
+**Computer → Pair a computer**. Each device has its own revocable credential.
+Both computers still use local browser URLs; Iroh connects the apps without DNS.
+The website's **CLI chats** picker opens a saved terminal conversation in the
+Hermes desktop workspace. Chats launched with `nectit cli` share one live runtime
+with the website. A standalone `hermes` chat requires finishing its turn and
+exiting that terminal before resuming here; its history is kept and its writer
+lease is respected. See [pairing and CLI continuation](app/README.md).
+
 ## Each installation is private and local
 
 Cloning this repository starts with an empty Nectit account and no connected
@@ -216,7 +237,7 @@ See [the backend protocol](docs/backend.md) and
 
 ```sh
 python3 -m unittest discover -s tests -p test_cli.py -v
-node --test service/core.test.mjs service/iroh-gateway.test.mjs app/server.test.mjs
+node --test service/core.test.mjs service/iroh-gateway.test.mjs app/server.test.mjs app/pairing.test.mjs
 ```
 
 Opt-in checks against an installed real Hermes, with no model inference request:
